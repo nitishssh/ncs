@@ -2,6 +2,7 @@
 from importlib import import_module
 
 REGISTRY = {
+    "hub": ("camctl.transports.hub", "HubTransport"),
     "mock": ("camctl.transports.mock", "MockTransport"),
     "wifi": ("camctl.transports.ccapi", "CCAPITransport"),
     "ble": ("camctl.transports.ble", "BLETransport"),

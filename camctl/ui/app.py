@@ -31,7 +31,7 @@ LABELS = {"exposure": "Exp. comp", "af_method": "AF method", "mode": "Mode", "tv
           "movie_mode": "Movie mode", "movie_size": "Size / fps", "movie_format": "Format",
           "movie_af": "Movie AF", "canon_log": "Canon Log", "picture_style": "Picture Style",
           "log_assist": "View Assist", "hdr_pq": "HDR PQ"}
-DEFAULT_ARG = {"mock": "", "wifi": "10.11.0.2:8090", "ble": "", "usb-edsdk": "", "usb-gphoto": "", "video": "0"}
+DEFAULT_ARG = {"hub": "", "mock": "", "wifi": "10.11.0.2:8090", "ble": "", "usb-edsdk": "", "usb-gphoto": "", "video": "0"}
 
 STYLE = """
 QWidget { background:#121212; color:#e8e8e8; font-size:13px; }
@@ -299,7 +299,7 @@ class MainWindow(QMainWindow):
 
     def connect_to(self, kind: str, arg: str, quiet: bool = False) -> bool:
         """Connect and remember it; while a connection is wanted, drops are retried every 5 s."""
-        kwargs = {"wifi": ({"host": arg.rsplit(":", 1)[0], "port": int(arg.rsplit(":", 1)[1])}
+        kwargs = {"hub": {"link": arg}, "wifi": ({"host": arg.rsplit(":", 1)[0], "port": int(arg.rsplit(":", 1)[1])}
                            if arg.count(":") == 1 else {"host": arg}), "ble": {"address": arg or None},
                   "video": {"index": int(arg) if arg.isdigit() else 0}}.get(kind, {})
         try:
@@ -498,6 +498,18 @@ class MainWindow(QMainWindow):
             self.p_exp.setVisible(True)
         if ev.get("added"):
             self.files.on_new_files(ev["added"])
+        if "recording" in ev:  # started/stopped from another device through the hub
+            rec = ev["recording"]
+            if bool(rec) != self.recording:
+                self.recording = bool(rec)
+                self._rec_t0 = rec.get("since", time.time()) if rec else None
+                self.update_rec()
+                self.update_rec_pill()
+                self.audio.camera_record(self.recording)  # mics follow the camera wherever Rec was pressed
+                if ev.get("by"):
+                    self.flash(f"Recording {'started' if rec else 'stopped'} on {ev['by']}")
+        if ev.get("camera_lost"):
+            self.flash(f"Hub: camera {ev['camera_lost']}")
 
     @staticmethod
     def repolish(w):

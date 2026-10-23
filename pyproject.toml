@@ -14,6 +14,9 @@ dependencies = [
   "noisereduce>=3.0",  # Audacity-style noise-profile reduction for saved recordings
   "imageio-ffmpeg>=0.5",  # bundled ffmpeg for voice-into-clip sync when none is installed
   "scipy>=1.10",
+  "aiohttp>=3.9",   # camctl hub: one camera shared by phone, Mac and Windows
+  "zeroconf>=0.130", # Bonjour discovery of the hub
+  "qrcode>=7",       # pairing QR codes
 ]
 
 [project.optional-dependencies]
