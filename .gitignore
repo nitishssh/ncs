@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Camera output (personal photos/videos stay out of git)
+captures/
+downloads/
+*.part
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
