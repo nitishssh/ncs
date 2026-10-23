@@ -5,6 +5,7 @@ The mics' own settings (gain, noise cancelling, safety track) live in the vendor
 not reachable from here; this module only uses the standard audio input the receiver exposes."""
 from __future__ import annotations
 
+import collections
 import queue
 import threading
 import time
@@ -35,6 +36,44 @@ class InputDevice:
         return f"{brand} ({self.name})" if brand and brand != self.name else self.name
 
 
+def output_devices() -> list[str]:
+    """Where processed voice can go: headphones, a receiver's output (-> 3.5 mm into the camera's MIC IN),
+    or a virtual device like BlackHole (-> OBS, Zoom, any app as a system mic)."""
+    if sd is None:
+        return []
+    return [d["name"] for d in sd.query_devices() if d["max_output_channels"] > 0]
+
+
+class OutputRoute:
+    """Plays processed blocks on an output device. A short queue decouples it from the mic, so a slow or
+    unplugged output can never stall recording; if it falls behind, old blocks are dropped (latency stays low)."""
+
+    def __init__(self, device: str, channels: int = 2, rate: int = RATE, max_blocks: int = 4):
+        self.device, self.max_blocks = device, max_blocks
+        self.q: collections.deque = collections.deque()
+        dev_ch = max(1, min(channels, sd.query_devices(device)["max_output_channels"]))
+        self.channels = dev_ch
+        self.stream = sd.OutputStream(device=device, channels=dev_ch, samplerate=rate, dtype="float32",
+                                      blocksize=1024, callback=self._callback)
+        self.stream.start()
+
+    def push(self, block: np.ndarray):
+        self.q.append(block[:, :self.channels] if block.shape[1] >= self.channels else
+                      np.repeat(block[:, :1], self.channels, axis=1))
+        while len(self.q) > self.max_blocks:
+            self.q.popleft()
+
+    def _callback(self, out, frames, t, status):
+        if self.q and len(self.q[0]) == frames:
+            out[:] = self.q.popleft()
+        else:
+            out.fill(0)
+
+    def close(self):
+        self.stream.stop()
+        self.stream.close()
+
+
 def input_devices() -> list[InputDevice]:
     if sd is None:
         return []
@@ -62,6 +101,9 @@ class MicInput:
         self._writer: threading.Thread | None = None
         self.path: Path | None = None
         self.started_at: float | None = None
+        self.process = None              # callable(block) -> block: the live voice chain
+        self.outputs: list[OutputRoute] = []
+        self._capture: list | None = None  # blocks collected by capture() (noise profile)
         self.stream = sd.InputStream(device=device, channels=channels, samplerate=rate, dtype="float32",
                                      blocksize=1024, callback=self._callback)
         self.stream.start()
@@ -73,7 +115,18 @@ class MicInput:
         if peak.max() >= 0.989:  # -0.1 dBFS
             self.clipped = True
         if self._q is not None:
-            self._q.put(data.copy())
+            self._q.put(data.copy())     # recordings stay raw; the cleaned copy is made offline
+        if self._capture is not None:
+            self._capture.append(data.copy())
+        if self.outputs:
+            out = data
+            if self.process is not None:
+                try:
+                    out = self.process(data)
+                except Exception:
+                    self.process = None  # a broken plugin must not kill the audio stream
+            for route in self.outputs:
+                route.push(out.copy())
 
     def levels(self) -> list[tuple[float, float]]:
         return list(self._levels)
@@ -111,7 +164,25 @@ class MicInput:
         self._writer.join(5)
         return self.path
 
+    def capture(self, seconds: float) -> np.ndarray:
+        """Collect `seconds` of input (e.g. room tone for a noise profile). Blocks the caller."""
+        self._capture = []
+        time.sleep(seconds)
+        blocks, self._capture = self._capture, None
+        return np.concatenate(blocks) if blocks else np.zeros((0, self.channels), np.float32)
+
+    def set_outputs(self, devices: list[str]):
+        for r in self.outputs:
+            r.close()
+        self.outputs = []
+        for d in devices:
+            try:
+                self.outputs.append(OutputRoute(d, self.channels, self.rate))
+            except Exception:
+                pass  # device vanished / busy: skip it, keep the rest
+
     def close(self):
+        self.set_outputs([])
         self.stop_recording()
         self.stream.stop()
         self.stream.close()

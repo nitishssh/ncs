@@ -10,6 +10,8 @@ dependencies = [
   "PySide6>=6.7",
   "sounddevice>=0.4",  # external mics (DJI Mic, Kreo Sonik) on the computer
   "soundfile>=0.12",
+  "pedalboard>=0.9",   # voice chain: low-cut, gate, EQ, compressor, limiter, VST3 plugins
+  "noisereduce>=3.0",  # Audacity-style noise-profile reduction for saved recordings
 ]
 
 [project.optional-dependencies]
