@@ -8,6 +8,8 @@ dependencies = [
   "bleak>=0.22",
   "opencv-python>=4.9",
   "PySide6>=6.7",
+  "sounddevice>=0.4",  # external mics (DJI Mic, Kreo Sonik) on the computer
+  "soundfile>=0.12",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +25,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# sounddevice sets ndarray.shape internally (deprecated in NumPy 2.5); not our code
+filterwarnings = ["ignore::DeprecationWarning:sounddevice"]
 
 [tool.setuptools.packages.find]
 include = ["camctl*"]

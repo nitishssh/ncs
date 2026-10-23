@@ -22,6 +22,7 @@ from camctl.labels import label
 from camctl.ui.files import FilesPanel
 from camctl.ui.events import EventHub
 from camctl.ui.tools import ToolsTab
+from camctl.ui.audio_tab import AudioTab
 
 PHOTO = ["mode", "tv", "av", "iso", "exposure", "wb", "af_method"]
 MOVIE = ["movie_mode", "movie_size", "movie_format", "movie_af"]
@@ -172,6 +173,10 @@ class MainWindow(QMainWindow):
                                        if b.isEnabled() and b.currentData() is not None})
         self.tools.message.connect(self.flash)
         self.tabs.addTab(self.tools, "Tools")
+        # External mics (DJI Mic, Kreo Sonik…) record WAVs into the same dated folder as imports
+        self.audio = AudioTab(lambda: self.files.dest())
+        self.audio.message.connect(self.flash)
+        self.tabs.addTab(self.audio, "Audio")
 
         # Controls
         self.shutter = QPushButton("Shoot")
@@ -520,6 +525,7 @@ class MainWindow(QMainWindow):
         self.recording = not self.recording
         self.safe(lambda: self.t.record(self.recording))
         self._rec_t0 = time.time() if self.recording else None
+        self.audio.camera_record(self.recording)
         self.update_rec()
         self.update_rec_pill()
 
@@ -577,6 +583,7 @@ class MainWindow(QMainWindow):
         return frame
 
     def closeEvent(self, e):
+        self.audio.shutdown()
         self._want = None
         self.retry.stop()
         if self.t:
