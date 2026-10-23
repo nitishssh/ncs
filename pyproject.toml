@@ -12,6 +12,8 @@ dependencies = [
   "soundfile>=0.12",
   "pedalboard>=0.9",   # voice chain: low-cut, gate, EQ, compressor, limiter, VST3 plugins
   "noisereduce>=3.0",  # Audacity-style noise-profile reduction for saved recordings
+  "imageio-ffmpeg>=0.5",  # bundled ffmpeg for voice-into-clip sync when none is installed
+  "scipy>=1.10",
 ]
 
 [project.optional-dependencies]

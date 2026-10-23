@@ -11,6 +11,7 @@ from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
+from camctl import sync
 from camctl.core import Cancelled
 
 THUMB = QSize(160, 106)
@@ -65,6 +66,7 @@ class Downloader(QThread):
 
 class FilesPanel(QWidget):
     message = Signal(str)
+    synced = Signal(str)  # voice-sync results, emitted from the worker thread
 
     def __init__(self):
         super().__init__()
@@ -74,6 +76,8 @@ class FilesPanel(QWidget):
         self.dl: Downloader | None = None
         self.watcher = None  # new files now come from the main window's EventHub
         self.items: dict[str, QListWidgetItem] = {}
+        self._got_movie = False
+        self.synced.connect(self._sync_finished)
 
         self.grid = QListWidget()
         self.grid.setViewMode(QListWidget.IconMode)
@@ -110,10 +114,18 @@ class FilesPanel(QWidget):
         self.cancel_btn.clicked.connect(self.cancel)
 
         tools = QHBoxLayout()
+        self.sync_btn = QPushButton("Sync voice")
+        self.sync_btn.setToolTip("Put the clean external-mic voice into every clip in the folder (<clip>_final.mp4)")
+        self.sync_btn.clicked.connect(self.sync_voice)
+        self.auto_sync = QCheckBox("Auto-sync voice")
+        self.auto_sync.setToolTip("After movies download, merge the matching mic recording into <clip>_final.mp4")
+        self.auto_sync.setChecked(True)
+        self._sync_running = False
         self.import_btn = QPushButton("Import new")
         self.import_btn.setToolTip("Download every file on the card that isn't in the download folder yet")
         self.import_btn.clicked.connect(self.import_new)
-        for w in (self.refresh_btn, self.import_btn, self.get_btn, self.auto, self.jpeg_only):
+        for w in (self.refresh_btn, self.import_btn, self.get_btn, self.auto, self.jpeg_only, self.sync_btn,
+                  self.auto_sync):
             tools.addWidget(w)
         tools.addStretch()
         tools.addWidget(self.folder_btn)
@@ -265,7 +277,37 @@ class FilesPanel(QWidget):
         self.bar_label.setText(f"{name}  {done / 1e6:.1f} / {total / 1e6:.1f} MB  ·  {rate / 1e6:.1f} MB/s"
                                f"  ·  {left:.0f}s left{more}")
 
+    def sync_voice(self):
+        """Merge matching voice recordings into the clips of today's folder, in the background."""
+        folder = self.dest()
+        if self._sync_running or not folder.exists():
+            return
+        self._sync_running = True
+        self.sync_btn.setEnabled(False)
+        self.message.emit("Syncing voice into clips…")
+
+        def work():
+            try:
+                results = sync.sync_folder(folder)
+            except Exception as e:
+                self.synced.emit(f"Voice sync failed: {e}")
+                return
+            if not results:
+                self.synced.emit("Voice sync: no new clip has a matching mic recording")
+                return
+            parts = [f"{r.output.name} (offset {r.offset.seconds:+.2f}s)" if r.output else f"{r.clip.name}: {r.error}"
+                     for r in results]
+            self.synced.emit("Voice synced: " + "; ".join(parts))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _sync_finished(self, msg: str):
+        self._sync_running = False
+        self.sync_btn.setEnabled(True)
+        self.message.emit(msg)
+
     def on_done(self, remote: str, local: str):
+        if local.lower().endswith(sync.VIDEO_EXT):
+            self._got_movie = True
         it = self.items.get(remote)
         if it:
             it.setText("✓ " + remote.rsplit("/", 1)[-1])
@@ -275,6 +317,9 @@ class FilesPanel(QWidget):
         self.message.emit(f"{remote.rsplit('/', 1)[-1]}: {msg}")
 
     def on_queue_finished(self):
+        if self.auto_sync.isChecked() and self._got_movie:
+            self._got_movie = False
+            self.sync_voice()
         self.bar.setVisible(False)
         self.cancel_btn.setVisible(False)
         self.bar_label.setText("")
