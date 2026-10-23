@@ -8,7 +8,7 @@ import pytest
 import soundfile as sf
 from scipy import signal
 
-from camctl import sync
+from studio_utility import sync
 
 SR = 48000
 

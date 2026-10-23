@@ -1,9 +1,9 @@
-# Canon EOS R50 V: features relevant to camctl
+# Canon EOS R50 V: features relevant to Studio Utility
 
 Source: Canon EOS R50 V Advanced User Guide (firmware 1.2.0+), https://cam.start.canon/en/C021/manual/html/
 
 ## Connectivity (Communication Functions menu)
-| Feature | What the manual says | camctl use |
+| Feature | What the manual says | Studio Utility use |
 |---|---|---|
 | **Camera Control API (CCAPI)** | Turned on in the camera at *Advanced connection → Camera Control API*. HTTP and HTTPS ports can be changed. Optional username and password. Connects through a Wi-Fi access point (setup wizard or manual entry). | Main control link. **The activation tool isn't needed.** |
 | USB: choose USB connection app | *Photo Import/Remote Control* (EOS Utility, PTP), *UVC/UAC streaming*, or *Canon app(s) for iPhone* | The mode must match the transport: PTP for EDSDK and gphoto2, UVC for video |

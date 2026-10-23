@@ -11,8 +11,8 @@ import pytest
 pytest.importorskip("aiohttp")
 from aiohttp import web  # noqa: E402
 
-from camctl.hub import server  # noqa: E402
-from camctl.transports.hub import HubTransport, parse_link  # noqa: E402
+from studio_utility.hub import server  # noqa: E402
+from studio_utility.transports.hub import HubTransport, parse_link  # noqa: E402
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def hub(tmp_path, monkeypatch):
     threading.Thread(target=loop.run_forever, daemon=True).start()
     base = f"http://127.0.0.1:{port}"
     for _ in range(50):  # wait for the mock camera to connect
-        if httpx.get(base + "/api/state", headers={"X-Camctl-Token": h.token}).json()["connection"] == "connected":
+        if httpx.get(base + "/api/state", headers={"X-Studio-Token": h.token}).json()["connection"] == "connected":
             break
         time.sleep(0.05)
     yield h, base
@@ -38,13 +38,13 @@ def hub(tmp_path, monkeypatch):
 
 
 def client(h, base, device):
-    return httpx.Client(base_url=base, headers={"X-Camctl-Token": h.token, "X-Camctl-Device": device}, timeout=10)
+    return httpx.Client(base_url=base, headers={"X-Studio-Token": h.token, "X-Studio-Device": device}, timeout=10)
 
 
 def test_requires_pairing_token(hub):
     h, base = hub
     assert httpx.get(base + "/api/state").status_code == 401
-    assert httpx.get(base + "/api/state", headers={"X-Camctl-Token": "wrong"}).status_code == 401
+    assert httpx.get(base + "/api/state", headers={"X-Studio-Token": "wrong"}).status_code == 401
     page = httpx.get(base + "/")
     assert page.status_code == 401 and "Pair this device" in page.text
 
@@ -52,8 +52,8 @@ def test_requires_pairing_token(hub):
 def test_qr_link_sets_cookie(hub):
     h, base = hub
     r = httpx.get(base + f"/?token={h.token}")
-    assert r.status_code == 200 and "camctl_token" in r.cookies
-    assert httpx.get(base + "/api/state", cookies={"camctl_token": h.token}).status_code == 200
+    assert r.status_code == 200 and "studio_token" in r.cookies
+    assert httpx.get(base + "/api/state", cookies={"studio_token": h.token}).status_code == 200
 
 
 def test_recording_on_one_device_reaches_others(hub):

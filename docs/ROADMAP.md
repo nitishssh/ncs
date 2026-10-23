@@ -1,4 +1,4 @@
-# camctl roadmap: closing the gap with the best camera software
+# Studio Utility roadmap: closing the gap with the best camera software
 
 Based on the comparison with EOS Utility, Camera Connect, digiCamControl, qDslrDashboard,
 Capture One / Lightroom and Smart Shooter (2026-10-23). Every item is built against the mock
@@ -43,9 +43,9 @@ first, then verified on the real R50 V through the Windows relay.
 ## Phase 5: Untested connections
 | # | Item | Done when |
 |---|---|---|
-| 5.1 | USB webcam (UVC) with the R50 V | Live view in camctl and OBS, delay measured |
+| 5.1 | USB webcam (UVC) with the R50 V | Live view in Studio Utility and OBS, delay measured |
 | 5.2 | USB tethering (EDSDK) | Shoot + download over USB on Windows (EDSDK download needed) |
-| 5.3 | Bluetooth remote | Shutter/record over BLE; UUIDs verified with `camctl ble-scan --services` |
+| 5.3 | Bluetooth remote | Shutter/record over BLE; UUIDs verified with `studio-utility ble-scan --services` |
 
 ## Later, if needed
 - Multi-camera control (a second CCAPI camera).

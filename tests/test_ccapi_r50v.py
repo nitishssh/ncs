@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from camctl.core import Cancelled
-from camctl.transports.ccapi import CCAPITransport
+from studio_utility.core import Cancelled
+from studio_utility.transports.ccapi import CCAPITransport
 from tests.fake_r50v import PHOTOS, FakeR50V
 
 

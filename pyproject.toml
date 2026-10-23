@@ -1,5 +1,5 @@
 [project]
-name = "camctl"
+name = "studio-utility"
 version = "0.1.0"
 description = "Custom cross-platform control software for Canon EOS R50 V (Wi-Fi, USB, Bluetooth, video)"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ dependencies = [
   "noisereduce>=3.0",  # Audacity-style noise-profile reduction for saved recordings
   "imageio-ffmpeg>=0.5",  # bundled ffmpeg for voice-into-clip sync when none is installed
   "scipy>=1.10",
-  "aiohttp>=3.9",   # camctl hub: one camera shared by phone, Mac and Windows
+  "aiohttp>=3.9",   # studio-utility hub: one camera shared by phone, Mac and Windows
   "zeroconf>=0.130", # Bonjour discovery of the hub
   "qrcode>=7",       # pairing QR codes
 ]
@@ -24,7 +24,7 @@ framegen = ["rife-ncnn-vulkan-python", "pillow"]
 gphoto = ["gphoto2>=2.5"]   # macOS/Linux USB fallback
 
 [project.scripts]
-camctl = "camctl.__main__:main"
+studio-utility = "studio_utility.__main__:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -36,4 +36,4 @@ testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning:sounddevice"]
 
 [tool.setuptools.packages.find]
-include = ["camctl*"]
+include = ["studio_utility*"]

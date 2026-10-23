@@ -3,7 +3,7 @@
 # Usage: powershell -ExecutionPolicy Bypass -File windows_uplink_tplink.ps1 [-Phone "Nitish's Phone"]
 param([string]$Phone = "Nitish's Phone", [string]$Usb = "Wi-Fi 2", [string]$Builtin = "Wi-Fi")
 
-$tmp = Join-Path $env:TEMP "camctl-wlan"
+$tmp = Join-Path $env:TEMP "studio-utility-wlan"
 New-Item -ItemType Directory -Force $tmp | Out-Null
 
 "--- Copying '$Phone' Wi-Fi profile to $Usb"

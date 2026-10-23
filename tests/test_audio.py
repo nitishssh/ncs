@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from camctl import audio
+from studio_utility import audio
 
 
 class FakeStream:
@@ -62,5 +62,5 @@ def test_device_labels():
 
 
 def test_meter_colours():
-    from camctl.ui.audio_tab import GREEN, RED, YELLOW, meter_style
+    from studio_utility.ui.audio_tab import GREEN, RED, YELLOW, meter_style
     assert [meter_style(x) for x in (-30, -6, -1)] == [GREEN, YELLOW, RED]

@@ -1,12 +1,12 @@
 """Entry point for the packaged app: double-click opens the Creator Panel.
-`camctl --self-test` checks the bundle (all transports import, mock camera works) and exits."""
+`studio-utility --self-test` checks the bundle (all transports import, mock camera works) and exits."""
 import sys
 
 
 def self_test() -> int:
     from importlib import import_module
 
-    from camctl import transports
+    from studio_utility import transports
     failed = []
     for kind, (module, cls) in transports.REGISTRY.items():
         try:
@@ -17,13 +17,13 @@ def self_test() -> int:
     t.connect()
     t.shoot()
     assert t.liveview_frame()[:2] == b"\xff\xd8"
-    from camctl import overlays, sequences  # noqa: F401  (bundled modules)
+    from studio_utility import overlays, sequences  # noqa: F401  (bundled modules)
     lines = ["self-test OK: mock camera works; transports: " + ", ".join(transports.REGISTRY)]
     lines += [f"  unavailable {f}" for f in failed]
     print("\n".join(lines))
-    # Windows GUI builds have no console: also leave the result in ~/.camctl/self_test.txt
+    # Windows GUI builds have no console: also leave the result in ~/.studio-utility/self_test.txt
     from pathlib import Path
-    out = Path.home() / ".camctl" / "self_test.txt"
+    out = Path.home() / ".studio-utility" / "self_test.txt"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n")
     return 0
@@ -32,5 +32,5 @@ def self_test() -> int:
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
-    from camctl.ui.app import run
+    from studio_utility.ui.app import run
     run()

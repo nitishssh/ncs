@@ -10,8 +10,8 @@
    │   en1 Wi-Fi        10.63.196.2   ← default route / internet
    │   en0 Ethernet     (no link)
    │   bridge0 Thunderbolt Bridge  10.11.0.1
-   │   USB: Owl 4K PRO camera (UVC)  ← tested OK with camctl
-   │   Runs camctl (.venv, Python 3.14)
+   │   USB: Owl 4K PRO camera (UVC)  ← tested OK with Studio Utility
+   │   Runs Studio Utility (.venv, Python 3.14)
    └──────────────────────┬───────────────────────┘
                           │ Thunderbolt cable (10.11.0.0/24)
    ┌──────────────────────┴───────────────────────┐
@@ -34,8 +34,8 @@
 ## Observations
 - **No router right now.** Both computers get internet from the same phone hotspot (10.63.196.x). If the camera joins that hotspot too, **the Mac and the Windows PC can both reach it with no extra hardware.**
 - The Thunderbolt link (10.11.0.x) is a fast private link between the two computers. Tailscale is installed on Windows.
-- The Canon EOS Utility installed on Windows is useful for checking USB tethering. It's Canon's own app and uses the same SDK (EDSDK) that camctl's USB support is built on.
-- **For the camera:** put the camera, the Mac (Ethernet en0, currently unused) and the Windows PC on **one router**. Then both computers can run camctl against a fixed camera IP.
+- The Canon EOS Utility installed on Windows is useful for checking USB tethering. It's Canon's own app and uses the same SDK (EDSDK) that Studio Utility's USB support is built on.
+- **For the camera:** put the camera, the Mac (Ethernet en0, currently unused) and the Windows PC on **one router**. Then both computers can run Studio Utility against a fixed camera IP.
 
 ## Proposed setup
 ```
@@ -63,7 +63,7 @@ TP-Link router (camera LAN, internet optional)
 
 Mac ══ Thunderbolt bridge (10.11.0.1 ⇄ 10.11.0.2) ══ Windows
    • If the Mac is not on the router: Windows forwards 10.11.0.2:8080 → camera
-     (scripts/windows_camera_proxy.ps1), camctl on the Mac uses host 10.11.0.2
+     (scripts/windows_camera_proxy.ps1), Studio Utility on the Mac uses host 10.11.0.2
    • Fast file transfer between the two computers (downloads, edits)
 Phone hotspot stays for internet only; it carries no camera traffic.
 ```
@@ -74,6 +74,6 @@ Camera R50 V ── Wi-Fi ── TL-WR845N router (192.168.0.1, LAN port, no WAN
    192.168.0.101 / fe80::7eb8:daff:fe30:f748, CCAPI :8080 (answers on IPv6 only)
 Windows "wednesday" ── USB-C Ethernet "Ethernet 3" ── router LAN (192.168.0.100, DHCP)
    runs scripts/ccapi_relay.py: 10.11.0.2:8080 → camera (firewall: Thunderbolt subnet only)
-Mac ══ Thunderbolt ══ Windows   → camctl wifi host 10.11.0.2
+Mac ══ Thunderbolt ══ Windows   → Studio Utility wifi host 10.11.0.2
 ```
 Live view ~18 fps at 512×288. The camera's control API is only up while it shows "connection established".

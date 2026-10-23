@@ -12,10 +12,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
 @pytest.fixture(scope="session")
-def app(tmp_path_factory):
-    QSettings.setDefaultFormat(QSettings.IniFormat)
-    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(tmp_path_factory.mktemp("qsettings")))
-    return QApplication.instance() or QApplication([])
+def app():
+    return QApplication.instance() or QApplication([])  # settings are isolated by tests/conftest.py
 
 
 def spin(app, seconds):
@@ -27,8 +25,8 @@ def spin(app, seconds):
 
 @pytest.fixture
 def win(app, tmp_path):
-    from camctl.ui.app import MainWindow
-    QSettings("camctl", "camctl").clear()
+    from studio_utility.ui.app import MainWindow
+    QSettings("studio-utility", "Studio Utility").clear()
     w = MainWindow()
     w.files.root = tmp_path / "imports"
     w.show()
@@ -81,7 +79,7 @@ def test_reconnects_after_drop(win, app):
 
 
 def test_close_is_fast(app, tmp_path):
-    from camctl.ui.app import MainWindow
+    from studio_utility.ui.app import MainWindow
     w = MainWindow()
     w.show()
     w.conn_btn.click()

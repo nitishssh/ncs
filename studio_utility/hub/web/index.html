@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Studio Utility">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="stylesheet" href="/static/style.css">
+<title>Studio Utility</title>
+</head>
+<body>
+<header class="bar">
+  <div class="cam">
+    <span id="dot" class="dot"></span>
+    <div>
+      <div id="model" class="model">Studio Utility</div>
+      <div id="conn" class="sub">Connecting…</div>
+    </div>
+  </div>
+  <div class="pills">
+    <span id="exp" class="pill hidden"></span>
+    <span id="card" class="pill hidden"></span>
+    <span id="bat" class="pill hidden"></span>
+  </div>
+</header>
+
+<main>
+  <section id="view-camera" class="view active">
+    <div id="stage" class="stage">
+      <img id="live" alt="" draggable="false">
+      <div id="empty" class="empty">Waiting for live view</div>
+      <div id="rec" class="rec hidden"><span class="led"></span><span id="rectime">00:00</span></div>
+      <div id="focusring" class="focusring"></div>
+    </div>
+    <div class="zoom">
+      <button class="chip" data-zoom="wide" aria-label="Zoom out">W</button>
+      <div class="zoomtrack"><div class="zoomhint">Hold to zoom</div></div>
+      <button class="chip" data-zoom="tele" aria-label="Zoom in">T</button>
+    </div>
+    <div id="quick" class="quick"></div>
+  </section>
+
+  <section id="view-settings" class="view">
+    <div id="settings" class="list"></div>
+  </section>
+
+  <section id="view-files" class="view">
+    <div class="files-head"><span id="filecount" class="sub"></span><button id="reload" class="link">Refresh</button></div>
+    <div id="files" class="grid"></div>
+  </section>
+</main>
+
+<footer class="dock">
+  <nav class="tabs">
+    <button class="tab active" data-view="camera">Camera</button>
+    <button class="tab" data-view="settings">Settings</button>
+    <button class="tab" data-view="files">Files</button>
+  </nav>
+  <div class="controls">
+    <button id="af" class="round small" aria-label="Autofocus">AF</button>
+    <button id="recbtn" class="shutter" aria-label="Record"><span></span></button>
+    <button id="shoot" class="round small" aria-label="Take photo">
+      <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="13" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 8h3l2-2.5h6L17 8h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</footer>
+
+<div id="toast" class="toast"></div>
+<div id="sheet" class="sheet"><div class="sheet-card"><div id="sheet-title" class="sheet-title"></div><div id="sheet-options"></div><button class="sheet-cancel" id="sheet-cancel">Cancel</button></div></div>
+
+<script src="/static/labels.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

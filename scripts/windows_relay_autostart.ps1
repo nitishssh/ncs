@@ -1,11 +1,11 @@
-# Make the camctl relay permanent: start it hidden at Windows login and restart it if it stops.
+# Make the studio-utility relay permanent: start it hidden at Windows login and restart it if it stops.
 # Also stops any relays started by hand, then starts the task now.
 # Usage:  powershell -ExecutionPolicy Bypass -File windows_relay_autostart.ps1 [-ListenPort 8090] [-Remove]
 param([string]$Camera = "fe80::7eb8:daff:fe30:f748", [string]$Iface = "Ethernet 3",
       [int]$ListenPort = 8090, [switch]$Remove)
 
-$name = "camctl relay"
-$root = Split-Path $PSScriptRoot -Parent           # ...\camctl
+$name = "studio-utility relay"
+$root = Split-Path $PSScriptRoot -Parent           # ...\studio-utility
 $pyw = Join-Path $root ".venv\Scripts\pythonw.exe"  # no console window
 
 # Stop relays started by hand (any port), so the task owns the port

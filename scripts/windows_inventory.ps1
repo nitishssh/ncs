@@ -1,4 +1,4 @@
-# Read-only inventory of the Windows PC for camctl. Run: ssh wednesday-tb "powershell -NoProfile -" < scripts/windows_inventory.ps1
+# Read-only inventory of the Windows PC for Studio Utility. Run: ssh wednesday-tb "powershell -NoProfile -" < scripts/windows_inventory.ps1
 $c = Get-CimInstance Win32_ComputerSystem; $o = Get-CimInstance Win32_OperatingSystem
 "OS: $($o.Caption) $($o.Version)"
 "Machine: $($c.Manufacturer) $($c.Model), RAM $([math]::Round($c.TotalPhysicalMemory/1GB)) GB"

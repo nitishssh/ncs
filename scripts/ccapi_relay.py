@@ -6,7 +6,7 @@ link-local IPv6 address, which Windows' built-in `netsh portproxy` cannot forwar
     .venv\\Scripts\\python scripts\\ccapi_relay.py --camera fe80::7eb8:daff:fe30:f748 --iface "Ethernet 3"
     .venv\\Scripts\\python scripts\\ccapi_relay.py --camera 192.168.0.101
 
-Then on the Mac: camctl -> wifi -> 10.11.0.2
+Then on the Mac: Studio Utility -> wifi -> 10.11.0.2
 """
 from __future__ import annotations
 

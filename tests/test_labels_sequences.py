@@ -5,10 +5,10 @@ import time
 
 import pytest
 
-from camctl import sequences
-from camctl.labels import label
-from camctl.sequences import Bracket, Interval, apply_preset, exposure_steps, load_presets, save_preset
-from camctl.transports.mock import ABILITY, MockTransport
+from studio_utility import sequences
+from studio_utility.labels import label
+from studio_utility.sequences import Bracket, Interval, apply_preset, exposure_steps, load_presets, save_preset
+from studio_utility.transports.mock import ABILITY, MockTransport
 
 
 @pytest.mark.parametrize("key,raw,shown", [
@@ -80,3 +80,25 @@ def test_presets_roundtrip(mock, tmp_path, monkeypatch):
     ok, failed = apply_preset(mock, load_presets()["Demo"])
     assert ok == ["movie_size", "wb"] and failed == ["iso"]
     assert mock.values["movie_size"] == "4K Crop 59.94p"
+
+
+def test_migration_from_camctl(tmp_path, monkeypatch):
+    """Settings and data from the camctl name carry over once; a second run changes nothing."""
+    from PySide6.QtCore import QSettings
+    from studio_utility import paths
+    monkeypatch.setattr(paths, "_OLD_DIR", tmp_path / ".camctl")
+    monkeypatch.setattr(paths, "CONFIG_DIR", tmp_path / ".studio-utility")
+    monkeypatch.setattr(paths, "_OLD_PREFS", ("camctl-test", "camctl-test"))
+    monkeypatch.setattr(paths, "PREFS", ("studio-utility-test", "Studio Utility Test"))
+    (tmp_path / ".camctl" / "noise").mkdir(parents=True)
+    (tmp_path / ".camctl" / "hub.json").write_text('{"token": "OLD"}')
+    old = QSettings(*paths._OLD_PREFS)
+    old.setValue("last_kind", "hub")
+    old.sync()
+    paths.migrate()
+    new = QSettings(*paths.PREFS)
+    assert new.value("last_kind") == "hub"
+    assert (tmp_path / ".studio-utility" / "hub.json").read_text() == '{"token": "OLD"}'
+    new.setValue("last_kind", "wifi")
+    paths.migrate()  # already migrated: must not overwrite newer settings
+    assert QSettings(*paths.PREFS).value("last_kind") == "wifi"

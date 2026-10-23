@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from camctl import audio, voice
+from studio_utility import audio, voice
 
 pytestmark = pytest.mark.skipif(voice.pb is None or voice.nr is None, reason="pedalboard/noisereduce not installed")
 SR = 48000

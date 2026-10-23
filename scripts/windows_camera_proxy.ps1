@@ -7,7 +7,7 @@ $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { "Needs Administrator: right-click PowerShell > Run as administrator."; exit 1 }
 
-$rule = "camctl CCAPI via Thunderbolt"
+$rule = "studio-utility CCAPI via Thunderbolt"
 if ($Remove) {
     netsh interface portproxy delete v4tov4 listenaddress=$ListenIp listenport=$Port | Out-Null
     Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
@@ -29,4 +29,4 @@ New-NetFirewallRule -DisplayName $rule -Direction Inbound -Protocol TCP -LocalAd
 
 "--- Active forwards"
 netsh interface portproxy show v4tov4
-"Mac: in camctl choose 'wifi' and enter $ListenIp"
+"Mac: in Studio Utility choose 'wifi' and enter $ListenIp"
