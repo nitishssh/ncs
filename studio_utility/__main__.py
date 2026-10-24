@@ -34,7 +34,12 @@ def main():
         print(json.dumps(t.get_setting(a.key), indent=2))
     elif a.cmd == "edsdk-discover":
         t = transports.load("usb-edsdk")
-        t.connect()
+        try:
+            t.connect()
+        except (FileNotFoundError, RuntimeError, OSError) as e:
+            raise SystemExit(f"Can't reach the camera over USB: {e}\n"
+                             "Steps: docs/EDSDK_TODO.md (get Canon's EDSDK into vendor/EDSDK, camera on USB in "
+                             "'Photo Import/Remote Control' mode, EOS Utility closed).")
         try:
             print(t.info().model)
             found = t.discover()
