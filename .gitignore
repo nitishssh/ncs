@@ -18,3 +18,6 @@ downloads/
 # PyInstaller output
 build/
 dist/
+
+# Canon EDSDK: free from Canon, but its licence does not allow publishing it with this repo
+vendor/

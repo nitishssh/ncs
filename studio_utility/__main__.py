@@ -13,6 +13,8 @@ def main():
     g = sub.add_parser("get")
     g.add_argument("key")
     g.add_argument("--host", default="192.168.1.2")
+    d = sub.add_parser("edsdk-discover", help="list every camera property reachable over USB (EDSDK)")
+    d.add_argument("--json", action="store_true")
     b = sub.add_parser("ble-scan")
     b.add_argument("--services", action="store_true", help="connect to first camera and dump GATT")
     a = p.parse_args()
@@ -30,6 +32,20 @@ def main():
         t = transports.load("wifi", host=a.host)
         t.connect()
         print(json.dumps(t.get_setting(a.key), indent=2))
+    elif a.cmd == "edsdk-discover":
+        t = transports.load("usb-edsdk")
+        t.connect()
+        try:
+            print(t.info().model)
+            found = t.discover()
+        finally:
+            t.disconnect()
+        if a.json:
+            print(json.dumps(found, indent=2))
+        else:
+            for p in found:
+                print(f"{p['id']}  {p['name']:18} options={p['options']:<3} value={p['value']}")
+        print(f"{len(found)} properties. Paste this output back so the remote controls can be extended.")
     elif a.cmd == "ble-scan":
         from studio_utility.transports.ble import BLETransport
         found = BLETransport.scan()

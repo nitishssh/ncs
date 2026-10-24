@@ -36,13 +36,14 @@ def advertise(port: int):
 def main():
     ap = argparse.ArgumentParser(prog="studio_utility.hub", description=__doc__)
     ap.add_argument("--camera", default="10.11.0.2:8090", help="host:port of the camera's CCAPI, or 'mock'")
+    ap.add_argument("--usb", action="store_true", help="prefer the camera on USB (Canon EDSDK), fall back to Wi-Fi")
     ap.add_argument("--port", type=int, default=8765)
     a = ap.parse_args()
     if a.camera == "mock":
         hub = Hub("mock")
     else:
         host, _, port = a.camera.partition(":")
-        hub = Hub("wifi", host=host, port=int(port or 8080))
+        hub = Hub("wifi", prefer_usb=a.usb, host=host, port=int(port or 8080))
     zc = advertise(a.port)
     print(f"studio-utility hub: http://localhost:{a.port}/pair shows the pairing QR code")
     for addr in lan_addresses():

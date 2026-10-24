@@ -73,8 +73,10 @@ def lan_addresses() -> list[str]:
 
 
 class Hub:
-    def __init__(self, kind: str = "wifi", **camera_kwargs):
+    def __init__(self, kind: str = "wifi", prefer_usb: bool = False, **camera_kwargs):
         self.kind, self.camera_kwargs = kind, camera_kwargs
+        # USB (EDSDK) exposes more of the camera than Wi-Fi (CCAPI); try it first, fall back to Wi-Fi
+        self.candidates = ([("usb-edsdk", {})] if prefer_usb else []) + [(kind, camera_kwargs)]
         self.t = None
         self.caps: set[str] = set()
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="camera")  # = the camera's limit
@@ -153,8 +155,17 @@ class Hub:
         while not self.stopping:
             if self.t is None:
                 try:
-                    t = transports.load(self.kind, **self.camera_kwargs)
-                    t.connect()
+                    t, errors = None, []
+                    for kind, kwargs in self.candidates:
+                        try:
+                            t = transports.load(kind, **kwargs)
+                            t.connect()
+                            break
+                        except Exception as e:  # e.g. no EDSDK installed / no USB camera: try the next link
+                            errors.append(f"{kind}: {str(e)[:50]}")
+                            t = None
+                    if t is None:
+                        raise RuntimeError("; ".join(errors))
                     caps = t.capabilities()
                     info = t.info()
                     settings = {}
@@ -424,6 +435,12 @@ class Hub:
             self.viewers -= 1
         return resp
 
+    async def api_discover(self, request):
+        """USB/EDSDK only: every property the camera answers (finds remotely settable Canon Log etc.)."""
+        if not hasattr(self.cam_t, "discover"):
+            raise web.HTTPBadRequest(text="discovery needs the camera on USB (EDSDK)")
+        return web.json_response(await self.cam(self.cam_t.discover))
+
     async def api_live_info(self, request):
         return web.json_response(await self.cam(self.cam_t.liveview_info))
 
@@ -448,6 +465,7 @@ class Hub:
         r.add_get("/api/live.jpg", self.api_live_jpg)
         r.add_get("/api/live.mjpg", self.api_live_mjpg)
         r.add_get("/api/live/info", self.api_live_info)
+        r.add_get("/api/discover", self.api_discover)
         def serve(name):
             async def handler(request):
                 return web.FileResponse(WEB / name)

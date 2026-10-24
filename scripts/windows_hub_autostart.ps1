@@ -31,7 +31,9 @@ Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName $rule -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow `
     -RemoteAddress @("10.63.196.0/24", "10.11.0.0/24", "192.168.0.0/24", "100.64.0.0/10", "LocalSubnet") | Out-Null
 
-$action = New-ScheduledTaskAction -Execute $pyw -Argument "-m studio_utility.hub --camera $Camera --port $Port" -WorkingDirectory $root
+# --usb: use the camera over USB (Canon EDSDK, more controls) when it's plugged in and the SDK is in vendor\EDSDK;
+# otherwise Wi-Fi through the relay exactly as before
+$action = New-ScheduledTaskAction -Execute $pyw -Argument "-m studio_utility.hub --camera $Camera --port $Port --usb" -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
