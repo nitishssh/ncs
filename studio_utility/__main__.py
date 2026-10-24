@@ -15,6 +15,9 @@ def main():
     g.add_argument("--host", default="192.168.1.2")
     d = sub.add_parser("edsdk-discover", help="list every camera property reachable over USB (EDSDK)")
     d.add_argument("--json", action="store_true")
+    u = sub.add_parser("usb-discover", help="list every camera setting reachable over USB")
+    u.add_argument("--via", choices=["gphoto", "edsdk"], default="gphoto")
+    u.add_argument("--json", action="store_true")
     b = sub.add_parser("ble-scan")
     b.add_argument("--services", action="store_true", help="connect to first camera and dump GATT")
     a = p.parse_args()
@@ -32,14 +35,16 @@ def main():
         t = transports.load("wifi", host=a.host)
         t.connect()
         print(json.dumps(t.get_setting(a.key), indent=2))
-    elif a.cmd == "edsdk-discover":
-        t = transports.load("usb-edsdk")
+    elif a.cmd in ("edsdk-discover", "usb-discover"):
+        t = transports.load("usb-gphoto" if getattr(a, "via", "edsdk") == "gphoto" else "usb-edsdk")
         try:
             t.connect()
         except (FileNotFoundError, RuntimeError, OSError) as e:
-            raise SystemExit(f"Can't reach the camera over USB: {e}\n"
-                             "Steps: docs/EDSDK_TODO.md (get Canon's EDSDK into vendor/EDSDK, camera on USB in "
-                             "'Photo Import/Remote Control' mode, EOS Utility closed).")
+            hint = ("Steps: docs/EDSDK_TODO.md (get Canon's EDSDK into vendor/EDSDK, camera on USB in "
+                    "'Photo Import/Remote Control' mode, EOS Utility closed)." if t.name == "usb-edsdk" else
+                    "Camera on this computer's USB, 'Photo Import/Remote Control' mode; on macOS quit Photos/Image "
+                    "Capture (and `killall PTPCamera ptpcamerad` if it says busy).")
+            raise SystemExit(f"Can't reach the camera over USB: {e}\n{hint}")
         try:
             print(t.info().model)
             found = t.discover()
@@ -49,7 +54,8 @@ def main():
             print(json.dumps(found, indent=2))
         else:
             for p in found:
-                print(f"{p['id']}  {p['name']:18} options={p['options']:<3} value={p['value']}")
+                ro = " (read-only)" if p.get("readonly") else ""
+                print(f"{p['id']:42} {str(p['name'])[:28]:28} options={p['options']:<3} value={p['value']}{ro}")
         print(f"{len(found)} properties. Paste this output back so the remote controls can be extended.")
     elif a.cmd == "ble-scan":
         from studio_utility.transports.ble import BLETransport
