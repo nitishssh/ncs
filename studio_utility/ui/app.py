@@ -543,15 +543,22 @@ class MainWindow(QMainWindow):
         transport = self.t
         self.run_camera("status", transport.status, self.show_status)
 
+    def show_battery(self, bat):
+        """Percent, or unknown (the R50 V reports no level on USB power / while charging)."""
+        if isinstance(bat, (int, float)):
+            self.p_bat.setText(f"🔋 {bat:.0f}%")
+            self.p_bat.setProperty("alert", "true" if bat <= 15 else "false")
+        else:
+            self.p_bat.setText("🔌 battery –")
+            self.p_bat.setToolTip("Camera reports no battery level (USB power or charging)")
+            self.p_bat.setProperty("alert", "false")
+        self.repolish(self.p_bat)
+        self.p_bat.setVisible(True)
+
     def show_status(self, s):
         if not self.t or not s:
             return
-        bat = s.get("battery")
-        if bat is not None:
-            self.p_bat.setText(f"🔋 {bat}%")
-            self.p_bat.setProperty("alert", "true" if bat <= 15 else "false")
-            self.repolish(self.p_bat)
-            self.p_bat.setVisible(True)
+        self.show_battery(s.get("battery"))
         if s.get("card_free_gb") is not None:
             self.p_card.setText(f"SD {s['card_free_gb']} GB")
             self.p_card.setVisible(True)
@@ -591,11 +598,8 @@ class MainWindow(QMainWindow):
             box.setEnabled(True)
             self.loading = False
         st = ev.get("status", {})
-        if st.get("battery") is not None:
-            self.p_bat.setText(f"🔋 {st['battery']}%")
-            self.p_bat.setProperty("alert", "true" if st["battery"] <= 15 else "false")
-            self.repolish(self.p_bat)
-            self.p_bat.setVisible(True)
+        if "battery" in st:
+            self.show_battery(st["battery"])
         if st.get("card_free_gb") is not None:
             left = f" · {st['shots_left']} shots" if st.get("shots_left") else ""
             self.p_card.setText(f"SD {st['card_free_gb']} GB{left}")

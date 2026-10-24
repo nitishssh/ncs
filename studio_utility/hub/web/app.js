@@ -33,7 +33,8 @@ function render() {
   $("model").textContent = state.info?.model || "Studio Utility";
   $("conn").textContent = connected ? `Connected · ${(state.info?.firmware && "fw " + state.info.firmware) || ""}` : state.connection || "Connecting…";
   const s = state.status || {};
-  setPill("bat", s.battery != null ? `${s.battery}%` : null, s.battery != null && s.battery <= 15);
+  const bat = typeof s.battery === "number" ? s.battery : null;  // "" = USB power / charging
+  setPill("bat", bat != null ? `${bat}%` : s.battery === "" ? "🔌" : null, bat != null && bat <= 15);
   setPill("card", s.card_free_gb != null ? `${s.card_free_gb} GB${s.shots_left ? " · " + s.shots_left : ""}` : null);
   const e = state.effective || {};
   setPill("exp", e.tv || e.av || e.iso ? [e.tv && label("tv", e.tv), e.av && label("av", e.av), e.iso && "ISO " + e.iso].filter(Boolean).join("  ") : null);

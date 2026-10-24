@@ -125,3 +125,9 @@ def test_connection_limits_protect_the_camera(cam, monkeypatch):
     tr = CCAPITransport(http_transport=cam.transport)
     tr.connect()
     assert [lim.max_connections for lim in seen] == [2, 1]
+
+
+@pytest.mark.parametrize("raw,pct", [("full", 100), ("", None), ("unknown", None), (42, 42)])
+def test_battery_level_forms(raw, pct):
+    from studio_utility.transports.ccapi import battery_percent
+    assert battery_percent(raw) == pct  # "" happens on USB power / while charging

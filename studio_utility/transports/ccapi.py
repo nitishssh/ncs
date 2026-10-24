@@ -31,6 +31,15 @@ STORAGE = "ver110/devicestatus/storage"
 EVENTS = "ver110/event/polling"
 
 
+def battery_percent(level) -> int | None:
+    """The R50 V reports a word ("full", "high", "half", "quarter", "low"), other bodies a number, and an
+    empty string on USB power / while charging -> None (unknown)."""
+    words = {"full": 100, "high": 75, "half": 50, "quarter": 25, "low": 10}
+    if isinstance(level, (int, float)):
+        return int(level)
+    return words.get(str(level).strip().lower())
+
+
 class CCAPITransport(Transport):
     name = "wifi"
 
@@ -187,7 +196,7 @@ class CCAPITransport(Transport):
         status = {}
         if isinstance(raw.get("battery"), dict):
             lvl = raw["battery"].get("level")
-            status["battery"] = {"full": 100, "high": 75, "half": 50, "quarter": 25, "low": 10}.get(str(lvl), lvl)
+            status["battery"] = battery_percent(lvl)
         try:
             status["card_free_gb"] = round(raw["storage"]["storagelist"][0]["spacesize"] / 1e9, 1)
         except (KeyError, IndexError, TypeError):
@@ -238,8 +247,7 @@ class CCAPITransport(Transport):
         bat = c.get(f"{self.base}/ver100/devicestatus/battery").json()
         # The R50 V reports a word ("full", "high", "half", "quarter", "low"), others a number
         level = bat.get("level")
-        words = {"full": 100, "high": 75, "half": 50, "quarter": 25, "low": 10}
-        out = {"battery": words.get(str(level), level), "temp": "normal",
+        out = {"battery": battery_percent(level), "temp": "normal",
                "recording": int(time.time() - self._rec_since) if getattr(self, "_rec_since", None) else None}
         try:
             st = c.get(f"{self.base}/{STORAGE}").json()["storagelist"][0]
