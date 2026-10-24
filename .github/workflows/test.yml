@@ -1,0 +1,29 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install locked environment
+        run: uv venv --python ${{ matrix.python }}
+      - name: Install locked dependencies
+        run: uv pip install -r requirements.lock
+      - name: Install application
+        run: uv pip install --no-deps -e .
+      - name: Run tests
+        run: uv run pytest -q

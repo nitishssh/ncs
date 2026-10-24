@@ -31,17 +31,27 @@ CONFIG = CONFIG_DIR / "hub.json"
 CACHE = CONFIG_DIR / "hub-cache"
 LOG_MAX = 500
 LIVE_FPS = 15
+ACCESS_ROLE = web.RequestKey("access_role", str)
+DEVICE_NAME = web.RequestKey("device_name", str)
 
 
-def load_token() -> str:
+def load_access() -> dict:
     migrate()
     try:
-        return json.loads(CONFIG.read_text())["token"]
+        data = json.loads(CONFIG.read_text())
+        if not data.get("token"):
+            raise KeyError("token")
+        data.setdefault("devices", {})
+        return data
     except (FileNotFoundError, KeyError, json.JSONDecodeError):
-        token = secrets.token_urlsafe(18)
+        data = {"token": secrets.token_urlsafe(18), "devices": {}}
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG.write_text(json.dumps({"token": token}))
-        return token
+        CONFIG.write_text(json.dumps(data))
+        return data
+
+
+def load_token() -> str:  # backwards-compatible helper used by older integrations
+    return load_access()["token"]
 
 
 def lan_addresses() -> list[str]:
@@ -68,7 +78,9 @@ class Hub:
         self.t = None
         self.caps: set[str] = set()
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="camera")  # = the camera's limit
-        self.token = load_token()
+        access = load_access()
+        self.token = access["token"]  # administrator/pairing secret
+        self.devices: dict[str, dict] = access["devices"]
         self.seq = 0
         self.log: list[dict] = []
         self.state: dict = {"connection": "connecting", "info": {}, "status": {}, "settings": {},
@@ -79,6 +91,27 @@ class Hub:
         self.viewers = 0
         self.loop: asyncio.AbstractEventLoop | None = None
         self.stopping = False
+
+    def save_access(self):
+        CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        temporary = CONFIG.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"token": self.token, "devices": self.devices}, indent=2))
+        temporary.replace(CONFIG)
+
+    def issue_device(self, name: str, role: str = "operator") -> tuple[str, str]:
+        if role not in ("viewer", "operator"):
+            raise ValueError("role must be viewer or operator")
+        device_id, token = secrets.token_urlsafe(9), secrets.token_urlsafe(24)
+        self.devices[device_id] = {"token": token, "name": (name or "Paired device")[:80],
+                                   "role": role, "created": time.time(), "last_seen": time.time()}
+        self.save_access()
+        return device_id, token
+
+    def device_for_token(self, token: str) -> tuple[str, dict] | None:
+        for device_id, device in self.devices.items():
+            if secrets.compare_digest(token, device.get("token", "")):
+                return device_id, device
+        return None
 
     # ---- event log / shared state
     def publish(self, event: dict):
@@ -194,13 +227,26 @@ class Hub:
                  # devices paired before the rename (camctl) keep working
                  or request.headers.get("X-Camctl-Token") or request.cookies.get("camctl_token"))
         local = request.remote in ("127.0.0.1", "::1")
-        if not secrets.compare_digest(token or "", self.token) and not (local and request.path == "/pair"):
+        admin = secrets.compare_digest(token or "", self.token)
+        matched = None if admin else self.device_for_token(token or "")
+        if not admin and not matched and not (local and request.path == "/pair"):
             if request.path.startswith("/api/"):
                 raise web.HTTPUnauthorized(text="pair this device first (scan the QR code on the hub)")
             return web.Response(text=(WEB / "locked.html").read_text(), content_type="text/html", status=401)
+        request[ACCESS_ROLE] = "admin" if admin or (local and request.path == "/pair") else matched[1]["role"]
+        request[DEVICE_NAME] = (request.headers.get("X-Studio-Device", "Administrator") if admin else
+                                (matched[1]["name"] if matched else "Hub"))
+        if matched:
+            matched[1]["last_seen"] = time.time()
+        if (request.path.startswith("/api/") and request.method not in ("GET", "HEAD")
+                and request[ACCESS_ROLE] == "viewer"):
+            raise web.HTTPForbidden(text="this device has view-only access")
         resp = await handler(request)
-        if request.query.get("token"):  # first visit from the QR code: remember the device
-            resp.set_cookie("studio_token", self.token, max_age=3600 * 24 * 365, httponly=True, samesite="Lax")
+        if admin and request.query.get("token") and request.path == "/":
+            # Exchange the administrator QR secret for a unique, revocable browser credential.
+            name = request.headers.get("X-Studio-Device") or request.headers.get("User-Agent", "Browser").split(" ", 1)[0]
+            _device_id, device_token = self.issue_device(name)
+            resp.set_cookie("studio_token", device_token, max_age=3600 * 24 * 365, httponly=True, samesite="Lax")
         return resp
 
     async def index(self, request):
@@ -227,6 +273,34 @@ class Hub:
     async def api_state(self, request):
         return web.json_response({"seq": self.seq, **self.state, "server_time": time.time()})
 
+    def require_admin(self, request):
+        if request.get(ACCESS_ROLE) != "admin":
+            raise web.HTTPForbidden(text="administrator access required")
+
+    async def api_devices(self, request):
+        self.require_admin(request)
+        return web.json_response([{"id": device_id, **{k: v for k, v in device.items() if k != "token"}}
+                                  for device_id, device in self.devices.items()])
+
+    async def api_device_role(self, request):
+        self.require_admin(request)
+        device = self.devices.get(request.match_info["device_id"])
+        if not device:
+            raise web.HTTPNotFound(text="unknown device")
+        role = (await request.json()).get("role")
+        if role not in ("viewer", "operator"):
+            raise web.HTTPBadRequest(text="role must be viewer or operator")
+        device["role"] = role
+        self.save_access()
+        return web.json_response({"ok": True, "role": role})
+
+    async def api_device_revoke(self, request):
+        self.require_admin(request)
+        if not self.devices.pop(request.match_info["device_id"], None):
+            raise web.HTTPNotFound(text="unknown device")
+        self.save_access()
+        return web.json_response({"ok": True})
+
     async def api_events(self, request):
         since = int(request.query.get("since", 0))
         timeout = min(float(request.query.get("timeout", 25)), 30)
@@ -251,7 +325,7 @@ class Hub:
         except Exception as e:
             raise web.HTTPBadGateway(text=f"{name}: {e}")
         if event:
-            self.publish({"type": name, "by": request.headers.get("X-Studio-Device", "device"), **event})
+            self.publish({"type": name, "by": request.get(DEVICE_NAME, "device"), **event})
         return web.json_response({"ok": True, "result": result if isinstance(result, (str, int, float, dict, list)) else None})
 
     async def api_shoot(self, request):
@@ -259,7 +333,7 @@ class Hub:
 
     async def api_record(self, request):
         start = bool((await request.json()).get("start"))
-        rec = {"since": time.time(), "by": request.headers.get("X-Studio-Device", "device")} if start else None
+        rec = {"since": time.time(), "by": request.get(DEVICE_NAME, "device")} if start else None
         return await self.act(request, "record", self.cam_t.record, start, event={"recording": rec})
 
     async def api_zoom(self, request):
@@ -310,7 +384,25 @@ class Hub:
             await asyncio.sleep(0.05)
         if not self.frame:
             raise web.HTTPServiceUnavailable(text="no live view")
-        return web.Response(body=self.frame, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
+        body = self.frame
+        if request.query.get("lut") == "clog3":  # preview the graded look; the camera still records log
+            body = await self.loop.run_in_executor(None, self.graded, self.frame_id, self.frame)
+        return web.Response(body=body, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    def graded(self, frame_id: int, jpg: bytes) -> bytes:
+        """Canon Log 3 -> Rec.709 preview of a frame, computed once per frame for all viewers."""
+        if getattr(self, "_graded", (None,))[0] == frame_id:
+            return self._graded[1]
+        import cv2
+        import numpy as np
+
+        from studio_utility.lut import apply_lut, clog3_to_rec709
+        if getattr(self, "_lut", None) is None:
+            self._lut = clog3_to_rec709()
+        img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+        out = cv2.imencode(".jpg", apply_lut(img, self._lut), [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
+        self._graded = (frame_id, out)
+        return out
 
     async def api_live_mjpg(self, request):
         resp = web.StreamResponse(headers={"Content-Type": "multipart/x-mixed-replace; boundary=frame",
@@ -341,6 +433,9 @@ class Hub:
         r.add_get("/", self.index)
         r.add_get("/pair", self.pair_page)
         r.add_get("/api/state", self.api_state)
+        r.add_get("/api/devices", self.api_devices)
+        r.add_put("/api/devices/{device_id}/role", self.api_device_role)
+        r.add_delete("/api/devices/{device_id}", self.api_device_revoke)
         r.add_get("/api/events", self.api_events)
         r.add_post("/api/shoot", self.api_shoot)
         r.add_post("/api/record", self.api_record)

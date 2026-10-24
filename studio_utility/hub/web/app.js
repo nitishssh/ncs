@@ -77,6 +77,19 @@ const QUICK = { movie_size: "Movie", tv: "Shutter", av: "Aperture", iso: "ISO", 
 function renderQuick() {
   const box = $("quick");
   box.innerHTML = "";
+  // Look: preview Canon Log as graded Rec.709 (the camera keeps recording log)
+  const look = document.createElement("button");
+  look.className = "q" + (lutOn ? " on" : "");
+  look.innerHTML = `<small>Look</small><b>${lutOn ? "Rec.709" : "Log (flat)"}</b>`;
+  look.onclick = () => {
+    lutOn = !lutOn;
+    try { localStorage.setItem("lut", lutOn ? "clog3" : ""); } catch (e) { /* not persisted */ }
+    haptic();
+    toast(lutOn ? "Previewing the graded look – recording stays Canon Log" : "Showing the flat log picture");
+    renderQuick();
+  };
+  box.appendChild(look);
+  $("lutbadge").classList.toggle("hidden", !lutOn);
   for (const [k, name] of Object.entries(QUICK)) {
     const d = state.settings?.[k];
     if (!d) continue;
@@ -155,6 +168,8 @@ async function loadState() {
 
 // ---------- live view: fetch frames in a loop while visible (works on every browser, unlike MJPEG <img>)
 let liveOn = false, lastUrl = null;
+let lutOn = false;
+try { lutOn = localStorage.getItem("lut") === "clog3"; } catch (e) { /* private mode: default off */ }
 async function liveLoop() {
   if (liveOn) return;
   liveOn = true;
@@ -163,7 +178,7 @@ async function liveLoop() {
   while (!document.hidden) {
     const t0 = performance.now();
     try {
-      const r = await fetch("/api/live.jpg", { cache: "no-store", headers: { "X-Studio-Device": DEVICE } });
+      const r = await fetch("/api/live.jpg" + (lutOn ? "?lut=clog3" : ""), { cache: "no-store", headers: { "X-Studio-Device": DEVICE } });
       if (!r.ok) throw new Error(r.status);
       const url = URL.createObjectURL(await r.blob());
       await new Promise((ok) => { img.onload = ok; img.onerror = ok; img.src = url; });

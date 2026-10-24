@@ -53,7 +53,34 @@ def test_qr_link_sets_cookie(hub):
     h, base = hub
     r = httpx.get(base + f"/?token={h.token}")
     assert r.status_code == 200 and "studio_token" in r.cookies
-    assert httpx.get(base + "/api/state", cookies={"studio_token": h.token}).status_code == 200
+    device_token = r.cookies["studio_token"]
+    assert device_token != h.token
+    assert httpx.get(base + "/api/state", cookies={"studio_token": device_token}).status_code == 200
+
+
+def test_device_roles_and_revocation(hub):
+    h, base = hub
+    device_id, token = h.issue_device("Client monitor", "viewer")
+    viewer = httpx.Client(base_url=base, headers={"X-Studio-Token": token}, timeout=10)
+
+    assert viewer.get("/api/state").status_code == 200
+    denied = viewer.post("/api/shoot")
+    assert denied.status_code == 403 and "view-only" in denied.text
+
+    admin = client(h, base, "Admin")
+    devices = admin.get("/api/devices").json()
+    assert any(d["id"] == device_id and d["role"] == "viewer" and "token" not in d for d in devices)
+    admin.put(f"/api/devices/{device_id}/role", json={"role": "operator"}).raise_for_status()
+    viewer.post("/api/shoot").raise_for_status()
+    admin.delete(f"/api/devices/{device_id}").raise_for_status()
+    assert viewer.get("/api/state").status_code == 401
+
+
+def test_device_cannot_manage_other_devices(hub):
+    h, base = hub
+    _device_id, token = h.issue_device("Operator", "operator")
+    operator = httpx.Client(base_url=base, headers={"X-Studio-Token": token}, timeout=10)
+    assert operator.get("/api/devices").status_code == 403
 
 
 def test_recording_on_one_device_reaches_others(hub):
@@ -133,3 +160,11 @@ def test_hub_transport_in_desktop_app_terms(hub, tmp_path):
 def test_parse_link():
     assert parse_link("http://10.63.196.242:8765/?token=abc") == ("http://10.63.196.242:8765", "abc")
     assert parse_link("10.11.0.2:8765/?token=xyz") == ("http://10.11.0.2:8765", "xyz")
+
+
+def test_live_view_graded_preview(hub):
+    h, base = hub
+    c = client(h, base, "iPhone")
+    flat = c.get("/api/live.jpg").content
+    graded = c.get("/api/live.jpg", params={"lut": "clog3"}).content
+    assert graded[:2] == b"\xff\xd8" and graded != flat  # a different (graded) JPEG, same frame

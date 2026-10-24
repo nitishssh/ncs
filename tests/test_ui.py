@@ -40,6 +40,7 @@ def test_settings_show_labels_send_raw(win, app):
     box = win.boxes["movie_size"]
     assert box.itemText(box.findData("4K Crop 59.94p")) == "4K Crop 59.94p"
     box.setCurrentIndex(box.findData("FHD 119.88p"))
+    spin(app, 0.2)
     assert win.t.values["movie_size"] == "FHD 119.88p"
 
 
@@ -54,6 +55,56 @@ def test_overlays_render(win, app):
         cb.setChecked(True)
     win.next_frame()
     assert not win.preview.pixmap().isNull()
+
+
+def test_record_state_changes_only_after_camera_accepts_command(win, app, monkeypatch):
+    mic_commands = []
+    monkeypatch.setattr(win.audio, "camera_record", mic_commands.append)
+
+    def reject(_start):
+        raise RuntimeError("card unavailable")
+
+    monkeypatch.setattr(win.t, "record", reject)
+    win.toggle_record()
+    spin(app, 0.2)
+
+    assert win.recording is False
+    assert win.rec.text() == "● Rec"
+    assert mic_commands == []
+    assert win.msg.text() == "Record command failed: card unavailable"
+
+
+def test_slow_camera_poll_does_not_block_ui(win, monkeypatch):
+    def slow_status():
+        time.sleep(0.5)
+        return {}
+
+    monkeypatch.setattr(win.t, "status", slow_status)
+    started = time.monotonic()
+    win.refresh_status()
+    assert time.monotonic() - started < 0.1
+
+
+def test_slow_connection_does_not_block_ui(app, monkeypatch):
+    from studio_utility import transports
+    from studio_utility.ui.app import MainWindow
+
+    real_load = transports.load
+
+    def slow_load(*args, **kwargs):
+        time.sleep(0.5)
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(transports, "load", slow_load)
+    QSettings("studio-utility", "Studio Utility").clear()
+    window = MainWindow()
+    started = time.monotonic()
+    window.connect_to("mock", "")
+    assert time.monotonic() - started < 0.1
+    assert window.conn_btn.text() == "Stop"
+    spin(app, 0.8)
+    assert window.t is not None and window.conn_btn.text() == "Disconnect"
+    window.close()
 
 
 def test_auto_import_and_import_new(win, app):
@@ -89,3 +140,13 @@ def test_close_is_fast(app, tmp_path):
     t0 = time.time()
     w.close()
     assert time.time() - t0 < 2
+
+
+def test_builtin_log_preview_lut(win, app):
+    from studio_utility.ui.app import BUILTIN_LUTS
+    name = next(iter(BUILTIN_LUTS))
+    win.set_lut(BUILTIN_LUTS[name](), name)
+    win.next_frame()
+    assert win.lut_btn.text() == f"LUT: {name}" and not win.preview.pixmap().isNull()
+    win.set_lut(None, None)
+    assert win.lut_btn.text() == "LUT: off"

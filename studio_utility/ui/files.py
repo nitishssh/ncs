@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel, QLis
 
 from studio_utility import sync
 from studio_utility.core import Cancelled
+from studio_utility.imports import ImportJournal
 
 THUMB = QSize(160, 106)
 DEFAULT_ROOT = Path.home() / "Pictures" / "R50V"
@@ -39,6 +40,7 @@ class ThumbLoader(QThread):
 
 
 class Downloader(QThread):
+    started = Signal(str, str)                # remote, destination
     progress = Signal(str, int, int, float)  # name, done, total, bytes/s
     done = Signal(str, str)                  # remote, local path
     failed = Signal(str, str)                # remote, message
@@ -53,6 +55,7 @@ class Downloader(QThread):
     def run(self):
         while self.queue and not self.cancelled:
             remote, dest = self.queue.pop(0)
+            self.started.emit(remote, str(dest))
             name, t0 = remote.rsplit("/", 1)[-1], time.time()
             try:
                 out = self.t.download(remote, dest, cancel=lambda: self.cancelled,
@@ -124,8 +127,12 @@ class FilesPanel(QWidget):
         self.import_btn = QPushButton("Import new")
         self.import_btn.setToolTip("Download every file on the card that isn't in the download folder yet")
         self.import_btn.clicked.connect(self.import_new)
+        self.resume_btn = QPushButton("Resume interrupted")
+        self.resume_btn.setToolTip("Retry transfers saved from an earlier session")
+        self.resume_btn.clicked.connect(self.resume_interrupted)
+        self.resume_btn.setVisible(False)
         for w in (self.refresh_btn, self.import_btn, self.get_btn, self.auto, self.jpeg_only, self.sync_btn,
-                  self.auto_sync):
+                  self.auto_sync, self.resume_btn):
             tools.addWidget(w)
         tools.addStretch()
         tools.addWidget(self.folder_btn)
@@ -153,6 +160,16 @@ class FilesPanel(QWidget):
         if path:
             self.root = Path(path)
             self.update_folder_label()
+            self.update_resume_button()
+
+    @property
+    def journal(self) -> ImportJournal:
+        return ImportJournal(self.root)
+
+    def update_resume_button(self):
+        count = len(self.journal.pending())
+        self.resume_btn.setText(f"Resume interrupted ({count})")
+        self.resume_btn.setVisible(count > 0)
 
     # transport lifecycle
     def set_transport(self, t, caps: set[str]):
@@ -164,6 +181,7 @@ class FilesPanel(QWidget):
             self.grid.clear()
             self.items.clear()
             return
+        self.update_resume_button()
 
     def stop_all(self):
         for th in (self.thumbs, self.watcher):
@@ -230,23 +248,40 @@ class FilesPanel(QWidget):
             it.setIcon(QIcon(pix))
 
     # downloads
-    def download(self, remotes: list[str]):
+    def download(self, remotes: list[str], destinations: dict[str, Path] | None = None):
         if not self.t or not remotes:
             return
+        destinations = destinations or {}
+        for remote in remotes:
+            destination = destinations.get(remote, self.dest())
+            self.journal.update(remote, destination, "queued")
         if not self.dl or not self.dl.isRunning():
             self.dl = Downloader(self.t)
+            self.dl.started.connect(self.on_download_started)
             self.dl.progress.connect(self.on_progress)
             self.dl.done.connect(self.on_done)
             self.dl.failed.connect(self.on_failed)
             self.dl.finished.connect(self.on_queue_finished)
             for r in remotes:
-                self.dl.add(r, self.dest())
+                self.dl.add(r, destinations.get(r, self.dest()))
             self.bar.setVisible(True)
             self.cancel_btn.setVisible(True)
             self.dl.start()
         else:
             for r in remotes:
-                self.dl.add(r, self.dest())
+                self.dl.add(r, destinations.get(r, self.dest()))
+
+    def resume_interrupted(self):
+        pending = self.journal.pending()
+        if not pending:
+            self.update_resume_button()
+            return
+        destinations = {remote: destination for remote, destination in pending}
+        self.download(list(destinations), destinations)
+        self.message.emit(f"Resuming {len(pending)} interrupted transfer(s)")
+
+    def on_download_started(self, remote: str, destination: str):
+        self.journal.update(remote, Path(destination), "downloading")
 
     def import_new(self):
         """One click: queue everything on the card not already saved anywhere under the download root."""
@@ -306,6 +341,7 @@ class FilesPanel(QWidget):
         self.message.emit(msg)
 
     def on_done(self, remote: str, local: str):
+        self.journal.update(remote, Path(local).parent, "completed")
         if local.lower().endswith(sync.VIDEO_EXT):
             self._got_movie = True
         it = self.items.get(remote)
@@ -314,6 +350,9 @@ class FilesPanel(QWidget):
         self.message.emit(f"Saved {local}")
 
     def on_failed(self, remote: str, msg: str):
+        current = dict(self.journal.pending()).get(remote, self.dest())
+        self.journal.update(remote, current, "cancelled" if msg == "cancelled" else "failed", msg)
+        self.update_resume_button()
         self.message.emit(f"{remote.rsplit('/', 1)[-1]}: {msg}")
 
     def on_queue_finished(self):
@@ -323,6 +362,7 @@ class FilesPanel(QWidget):
         self.bar.setVisible(False)
         self.cancel_btn.setVisible(False)
         self.bar_label.setText("")
+        self.update_resume_button()
 
     def cancel(self):
         if self.dl:

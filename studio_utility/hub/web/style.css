@@ -45,6 +45,9 @@ main { flex: 1; position: relative; overflow: hidden; }
 .rec { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 99px; background: rgba(0,0,0,.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .led { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .35; } }
+.lutbadge { position: absolute; left: 10px; bottom: 10px; padding: 3px 8px; border-radius: 6px; background: rgba(0,0,0,.55); font-size: 11px; font-weight: 600; letter-spacing: .5px; color: var(--yellow); }
+.q.on { background: rgba(255, 214, 10, .16); }
+.q.on b { color: var(--yellow); }
 .focusring { position: absolute; width: 74px; height: 74px; margin: -37px 0 0 -37px; border: 1.5px solid var(--yellow); border-radius: 12px; opacity: 0; transform: scale(1.4); pointer-events: none; }
 .focusring.show { animation: focus .9s var(--spring) forwards; }
 @keyframes focus { 0% { opacity: 1; transform: scale(1.4); } 35% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1); } }

@@ -84,8 +84,20 @@ def test_presets_roundtrip(mock, tmp_path, monkeypatch):
 
 def test_migration_from_camctl(tmp_path, monkeypatch):
     """Settings and data from the camctl name carry over once; a second run changes nothing."""
-    from PySide6.QtCore import QSettings
+    from PySide6 import QtCore
     from studio_utility import paths
+
+    # Native macOS preferences can persist across runs even with HOME redirected.
+    # Give both the test and migrate() real QSettings backed by temporary files.
+    native_qsettings = QtCore.QSettings
+
+    def QSettings(organization, application):
+        return native_qsettings(
+            str(tmp_path / organization / f"{application}.ini"),
+            native_qsettings.Format.IniFormat,
+        )
+
+    monkeypatch.setattr(QtCore, "QSettings", QSettings)
     monkeypatch.setattr(paths, "_OLD_DIR", tmp_path / ".camctl")
     monkeypatch.setattr(paths, "CONFIG_DIR", tmp_path / ".studio-utility")
     monkeypatch.setattr(paths, "_OLD_PREFS", ("camctl-test", "camctl-test"))
@@ -102,3 +114,16 @@ def test_migration_from_camctl(tmp_path, monkeypatch):
     new.setValue("last_kind", "wifi")
     paths.migrate()  # already migrated: must not overwrite newer settings
     assert QSettings(*paths.PREFS).value("last_kind") == "wifi"
+
+
+def test_clog3_curve_matches_canon_and_lut_exports(tmp_path):
+    import numpy as np
+    from studio_utility import lut
+    assert round(float(lut.linear_to_clog3(0.18 / 0.9)), 3) == 0.343  # Canon: 18% grey -> 34.3%
+    x = np.linspace(0, 1, 21)
+    assert np.allclose(lut.linear_to_clog3(lut.clog3_to_linear(x)), x)
+    table = lut.clog3_to_rec709()
+    i = round(0.343 * 32)
+    assert abs(float(table[i, i, i].mean()) - 0.41) < 0.02  # mid grey lands at Rec.709 mid grey
+    path = lut.write_cube(table, tmp_path / "clog3.cube", "test")
+    assert np.allclose(lut.load_cube(path), table, atol=1e-5)

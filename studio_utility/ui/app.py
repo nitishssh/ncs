@@ -1,13 +1,14 @@
 """Creator Panel - minimal PySide6 control UI, same code on macOS and Windows."""
 from __future__ import annotations
 
+import logging
 import sys
 import time
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QApplication, QMenu, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QMainWindow, QPushButton, QSlider, QTabWidget,
                                QVBoxLayout, QWidget)
 
@@ -15,7 +16,7 @@ import cv2
 import numpy as np
 
 from studio_utility import transports
-from studio_utility.lut import apply_lut, load_cube
+from studio_utility.lut import BUILTIN as BUILTIN_LUTS, apply_lut, clog3_to_rec709, load_cube, write_cube
 from studio_utility.core import NotSupported
 from studio_utility.paths import PREFS, migrate
 from studio_utility import overlays
@@ -24,6 +25,10 @@ from studio_utility.ui.files import FilesPanel
 from studio_utility.ui.events import EventHub
 from studio_utility.ui.tools import ToolsTab
 from studio_utility.ui.audio_tab import AudioTab
+from studio_utility.ui.workers import CameraExecutor
+from studio_utility.ui.connection import ConnectionDialog
+
+log = logging.getLogger(__name__)
 
 PHOTO = ["mode", "tv", "av", "iso", "exposure", "wb", "af_method"]
 MOVIE = ["movie_mode", "movie_size", "movie_format", "movie_af"]
@@ -86,6 +91,8 @@ class MainWindow(QMainWindow):
         self.caps: set[str] = set()
         self.recording = False
         self.loading = False
+        self._connecting = False
+        self.io = CameraExecutor(parent=self)
 
         # Connection bar
         self.kind = QComboBox()
@@ -95,10 +102,13 @@ class MainWindow(QMainWindow):
         self.arg.setPlaceholderText("IP / BLE address / video index")
         self.conn_btn = QPushButton("Connect")
         self.conn_btn.clicked.connect(self.toggle_connect)
+        self.setup_btn = QPushButton("Setup…")
+        self.setup_btn.clicked.connect(self.open_connection_setup)
         top = QHBoxLayout()
         top.addWidget(self.kind)
         top.addWidget(self.arg, 1)
         top.addWidget(self.conn_btn)
+        top.addWidget(self.setup_btn)
         self.framegen = QCheckBox("2× frames")
         self.framegen.setToolTip("Frame generation: insert an optical-flow frame between each captured pair")
         self.framegen.setVisible(False)
@@ -139,16 +149,16 @@ class MainWindow(QMainWindow):
         # Zoom row
         self.zoom = QSlider(Qt.Horizontal)
         self.zoom.setRange(0, 100)
-        self.zoom.valueChanged.connect(lambda v: self.t and self.safe(lambda: self.t.zoom(v)))
+        self.zoom.valueChanged.connect(lambda v: self.run_camera("zoom", lambda: self.t.zoom(v)))
         self.af_btn = QPushButton("AF")
         self.af_btn.setToolTip("Focus without taking a picture")
-        self.af_btn.clicked.connect(lambda: self.safe(self.t.half_press))
+        self.af_btn.clicked.connect(lambda: self.run_camera("focus", self.t.half_press))
         # Continuous power zoom (real R50 V): hold W/T to move, release to stop
         self.wide_btn, self.tele_btn = QPushButton("◀ W"), QPushButton("T ▶")
         for b, d in ((self.wide_btn, "wide"), (self.tele_btn, "tele")):
             b.setToolTip("Hold to zoom")
-            b.pressed.connect(lambda d=d: self.t and self.safe(lambda: self.t.zoom_move(d)))
-            b.released.connect(lambda: self.t and self.safe(lambda: self.t.zoom_move("stop")))
+            b.pressed.connect(lambda d=d: self.run_camera("zoom-move", lambda: self.t.zoom_move(d)))
+            b.released.connect(lambda: self.run_camera("zoom-stop", lambda: self.t.zoom_move("stop")))
         self.zoom_w, self.zoom_t = QLabel("W"), QLabel("T")
         zoom_row = QHBoxLayout()
         for w in (self.wide_btn, self.zoom_w, self.zoom, self.zoom_t, self.tele_btn):
@@ -165,9 +175,16 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_grid(PHOTO), "Photo")
         color = self.settings_grid(COLOR)
         self.lut = None
-        self.lut_btn = QPushButton("Load LUT…")
-        self.lut_btn.setToolTip("Preview a .cube LUT on live view (e.g. Canon's C-Log3 → Rec.709). Recording is unchanged.")
-        self.lut_btn.clicked.connect(self.toggle_lut)
+        self.lut_btn = QPushButton("LUT: off")
+        self.lut_btn.setToolTip("Preview how Canon Log footage will look after grading. Recording stays log.")
+        lut_menu = QMenu(self.lut_btn)
+        for name in BUILTIN_LUTS:
+            lut_menu.addAction(name, lambda n=name: self.set_lut(BUILTIN_LUTS[n](), n))
+        lut_menu.addAction("Load .cube file… (e.g. Canon's official LUT)", self.load_lut_file)
+        lut_menu.addSeparator()
+        lut_menu.addAction("Export Canon Log 3 → Rec.709 .cube for editing…", self.export_lut)
+        lut_menu.addAction("Off", lambda: self.set_lut(None, None))
+        self.lut_btn.setMenu(lut_menu)
         color.layout().addWidget(self.lut_btn, 1, len(COLOR))
         self.tabs.addTab(color, "Color")
         self.tools = ToolsTab(lambda: {k: b.currentData() for k, b in self.boxes.items()
@@ -234,8 +251,7 @@ class MainWindow(QMainWindow):
         self.kind.setCurrentText(last_kind)
         self.arg.setText(self.prefs.value("last_arg", ""))
         if last_kind != "mock" and self.prefs.value("auto_connect", True, type=bool):
-            QTimer.singleShot(300, lambda: self.connect_to(last_kind, self.arg.text().strip(), quiet=True)
-                              or self.start_waiting(last_kind, self.arg.text().strip()))
+            QTimer.singleShot(300, lambda: self.connect_to(last_kind, self.arg.text().strip(), quiet=True))
 
     def settings_grid(self, keys: list[str]) -> QWidget:
         grid = QGridLayout()
@@ -285,37 +301,102 @@ class MainWindow(QMainWindow):
             self.flash(f"Error: {e}")
         return None
 
+    def run_camera(self, key, fn, done=lambda _value: None, failed=None) -> bool:
+        """Run camera I/O without blocking Qt; repeated polling calls are coalesced by key."""
+        if not self.t:
+            return False
+
+        def report(error):
+            log.warning("Camera operation %s failed: %s", key, error, exc_info=(type(error), error, error.__traceback__))
+            if failed:
+                failed(error)
+            elif isinstance(error, NotSupported):
+                self.flash(f"Not supported over {self.t.name if self.t else 'this connection'}")
+            else:
+                self.flash(f"Error: {error}")
+
+        return self.io.submit(key, fn, done, report)
+
+    def open_connection_setup(self):
+        dialog = ConnectionDialog(self.kind.currentText(), self.arg.text().strip(), self)
+        if dialog.exec():
+            kind, value = dialog.selected()
+            self.kind.setCurrentText(kind)
+            self.arg.setText(value)
+
     # connection
     def toggle_connect(self):
-        if self.t or self._want:
+        if self.t or self._want or self._connecting:
             self._want = None  # user disconnected: stop auto-reconnecting
             self.retry.stop()
             if self.t:
                 self.disconnect()
             else:
+                self._connecting = False
                 self.set_connected(False)
                 self.flash("Disconnected")
             return
         self.connect_to(self.kind.currentText(), self.arg.text().strip())
 
     def connect_to(self, kind: str, arg: str, quiet: bool = False) -> bool:
-        """Connect and remember it; while a connection is wanted, drops are retried every 5 s."""
-        kwargs = {"hub": {"link": arg}, "wifi": ({"host": arg.rsplit(":", 1)[0], "port": int(arg.rsplit(":", 1)[1])}
-                           if arg.count(":") == 1 else {"host": arg}), "ble": {"address": arg or None},
-                  "video": {"index": int(arg) if arg.isdigit() else 0}}.get(kind, {})
+        """Connect and inspect the camera in a worker, then install it on the Qt thread."""
         try:
-            self.t = transports.load(kind, **kwargs)
-            self.t.connect()
-        except Exception as e:
-            self.t = None
-            if not quiet:
-                self.flash(f"Connect failed: {e}")
+            kwargs = {"hub": {"link": arg}, "wifi": ({"host": arg.rsplit(":", 1)[0], "port": int(arg.rsplit(":", 1)[1])}
+                               if arg.count(":") == 1 else {"host": arg}), "ble": {"address": arg or None},
+                      "video": {"index": int(arg) if arg.isdigit() else 0}}.get(kind, {})
+        except (TypeError, ValueError) as error:
+            self.flash(f"Connect failed: {error}")
             return False
+
         self._want = (kind, arg)
+        self._connecting = True
         self.retry.stop()
+        self.kind.setEnabled(False)
+        self.arg.setEnabled(False)
+        self.conn_btn.setText("Stop")
+        self.flash(f"Connecting to {arg or kind}…")
+
+        def bootstrap():
+            transport = transports.load(kind, **kwargs)
+            transport.connect()
+            caps = transport.capabilities()
+            try:
+                model = transport.info().model
+            except Exception:
+                model = kind
+            settings = {}
+            if "get_setting" in caps:
+                for key in self.boxes:
+                    try:
+                        settings[key] = (transport.get_setting(key), None)
+                    except Exception as error:
+                        response = getattr(getattr(error, "response", None), "text", "")
+                        settings[key] = (None, "locked" if "Mode not supported" in str(response) else "unavailable")
+            status = transport.status() if "status" in caps else {}
+            if hasattr(transport, "start_liveview"):
+                transport.start_liveview()
+            return transport, caps, model, settings, status
+
+        started = self.io.submit(
+            "connect", bootstrap,
+            lambda result: self.connection_ready(kind, arg, result),
+            lambda error: self.connection_failed(kind, arg, error, quiet),
+        )
+        if not started:
+            self._connecting = False
+            return False
+        return True
+
+    def connection_ready(self, kind, arg, result):
+        transport, caps, model, settings, status = result
+        if self._want != (kind, arg):
+            self.io.submit(f"disconnect:{id(transport)}", transport.disconnect, lambda _v: None, lambda _e: None)
+            return
+        self._connecting = False
+        self.t = transport
         self.prefs.setValue("last_kind", kind)
         self.prefs.setValue("last_arg", arg)
-        self.caps = self.t.capabilities()
+        self.caps = caps
         self.set_connected(True)
         self.files.set_transport(self.t, self.caps)
         self.tools.set_transport(self.t)
@@ -323,11 +404,9 @@ class MainWindow(QMainWindow):
             self.hub = EventHub(self.t)
             self.hub.event.connect(self.on_event)
             self.hub.start()
-        self.model.setText(self.safe(lambda: self.t.info().model) or kind)
-        self.load_settings()
-        self.refresh_status()
-        if hasattr(self.t, "start_liveview"):
-            self.safe(self.t.start_liveview)
+        self.model.setText(model)
+        self.apply_settings(settings)
+        self.show_status(status)
         self.framegen.setVisible(hasattr(self.t, "framegen"))
         if "liveview_frame" in self.caps:
             self.live.start(33 if self.framegen.isChecked() else 66)
@@ -335,8 +414,26 @@ class MainWindow(QMainWindow):
             # With live events, a slow safety poll is enough; the recording timer runs locally
             self.poll.start(15000 if self.hub else 1000)
         self.rec_timer.start(1000)
-        self.flash("Connected. Click the preview to focus.")
-        return True
+        message = f"Reconnected after {self._attempts} attempt(s)." if self._attempts else "Connected. Click the preview to focus."
+        self.flash(message)
+        self._attempts = 0
+
+    def connection_failed(self, kind, arg, error, quiet):
+        log.warning("Connection via %s failed: %s", kind, error,
+                    exc_info=(type(error), error, error.__traceback__))
+        if self._want != (kind, arg):
+            return
+        self._connecting = False
+        self.t = None
+        self.set_connected(False)
+        self.conn_btn.setText("Stop")
+        if quiet or self._attempts:
+            self.flash(f"Waiting for camera… (attempt {self._attempts}; {error})")
+            self.retry.start(5000)
+        else:
+            self._want = None
+            self.conn_btn.setText("Connect")
+            self.flash(f"Connect failed: {error}")
 
     def connection_lost(self, why: str):
         """Called when live view or status fails hard: drop the transport and keep retrying."""
@@ -353,33 +450,30 @@ class MainWindow(QMainWindow):
         if not self._want or self.t:
             self.retry.stop()
             return
-        self._attempts += 1
-        if self.connect_to(*self._want, quiet=True):
-            self.flash(f"Reconnected after {self._attempts} attempt(s).")
-        else:
-            self.flash(f"Waiting for camera… (attempt {self._attempts}; turn it on and reconnect Camera Control API)")
-
-    def start_waiting(self, kind: str, arg: str):
-        """Launch-time auto-connect failed: keep trying in the background."""
-        self._want, self._attempts = (kind, arg), 0
-        self.conn_btn.setText("Stop")
-        self.flash(f"Waiting for camera at {arg}…")
-        self.retry.start(5000)
-
-    def toggle_lut(self):
-        if self.lut is not None:
-            self.lut = None
-            self.lut_btn.setText("Load LUT…")
+        if self._connecting:
             return
+        self._attempts += 1
+        self.connect_to(*self._want, quiet=True)
+
+    def set_lut(self, table, name):
+        self.lut = table
+        self.lut_btn.setText(f"LUT: {name}" if name else "LUT: off")
+
+    def load_lut_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load LUT", "", "3D LUT (*.cube)")
         if not path:
             return
         try:
-            self.lut = load_cube(path)
+            self.set_lut(load_cube(path), Path(path).stem)
         except Exception as e:
             self.flash(f"LUT failed: {e}")
-            return
-        self.lut_btn.setText(f"LUT: {Path(path).stem} ✕")
+
+    def export_lut(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export LUT", "Canon Log 3 to Rec709 (Studio Utility).cube",
+                                              "3D LUT (*.cube)")
+        if path:
+            write_cube(clog3_to_rec709(), path, "Canon Log 3 to Rec709 (Studio Utility preview)")
+            self.flash(f"Saved {path} - load it in DaVinci Resolve, Premiere or Final Cut")
 
     def set_framegen(self, on: bool):
         if self.t and hasattr(self.t, "framegen"):
@@ -409,28 +503,48 @@ class MainWindow(QMainWindow):
         self.flash("")
 
     def load_settings(self):
+        if not self.t or "get_setting" not in self.caps:
+            return
+        transport = self.t
+
+        def fetch():
+            settings = {}
+            for key in self.boxes:
+                try:
+                    settings[key] = (transport.get_setting(key), None)
+                except Exception as error:
+                    response = getattr(getattr(error, "response", None), "text", "")
+                    settings[key] = (None, "locked" if "Mode not supported" in str(response) else "unavailable")
+            return settings
+
+        self.run_camera("settings", fetch, self.apply_settings)
+
+    def apply_settings(self, settings):
         self.loading = True
         for key, box in self.boxes.items():
             box.clear()
-            try:
-                data = self.t.get_setting(key)
+            data, error = settings.get(key, (None, "unavailable"))
+            if data is not None:
                 values = [str(v) for v in data.get("ability", [])] or [str(data.get("value"))]
                 for v in values:
                     box.addItem(label(key, v), v)
                 box.setCurrentIndex(max(box.findData(str(data.get("value", ""))), 0))
                 box.setToolTip("")
-            except Exception as e:
+                box.setEnabled(True)
+            else:
                 box.setEnabled(False)
-                locked = "Mode not supported" in str(getattr(getattr(e, "response", None), "text", ""))
-                box.setToolTip("Locked in the camera's current shooting mode (use P, Tv, Av or M)" if locked
+                box.setToolTip("Locked in the camera's current shooting mode (use P, Tv, Av or M)" if error == "locked"
                                else "Not available on this camera or connection")
         self.loading = False
 
     def refresh_status(self):
         if not self.t or "status" not in self.caps:
             return
-        s = self.safe(self.t.status)
-        if not s:
+        transport = self.t
+        self.run_camera("status", transport.status, self.show_status)
+
+    def show_status(self, s):
+        if not self.t or not s:
             return
         bat = s.get("battery")
         if bat is not None:
@@ -520,27 +634,49 @@ class MainWindow(QMainWindow):
     # actions
     def change_setting(self, key: str, value: str):
         if self.t and not self.loading and value:
-            if self.safe(lambda: self.t.set_setting(key, value)) is None and self.msg.text().startswith("Error"):
-                self.load_settings()
+            transport = self.t
+            self.run_camera(f"setting:{key}", lambda: transport.set_setting(key, value),
+                            failed=lambda error: (self.flash(f"Error: {error}"), self.load_settings()))
 
     def focus_at(self, x: float, y: float):
         if self.t and "focus_at" in self.caps:
-            self.safe(lambda: self.t.focus_at(x, y))
-            self.flash(f"Focus at {x:.2f}, {y:.2f}")
+            transport = self.t
+            self.run_camera("focus", lambda: transport.focus_at(x, y),
+                            done=lambda _value: self.flash(f"Focus at {x:.2f}, {y:.2f}"))
 
     def shoot(self):
-        self.safe(self.t.shoot)
-        # With auto-import on, the new-file watcher adds the shot; otherwise reload the grid
-        if self.files.isVisible() and not self.files.auto.isChecked():
-            self.files.refresh()
+        transport = self.t
+        self.shutter.setEnabled(False)
+
+        def shot(_value):
+            self.shutter.setEnabled(True)
+            if self.files.isVisible() and not self.files.auto.isChecked():
+                self.files.refresh()
+
+        self.run_camera("shoot", transport.shoot, shot,
+                        lambda error: (self.shutter.setEnabled(True), self.flash(f"Shoot failed: {error}")))
 
     def toggle_record(self):
-        self.recording = not self.recording
-        self.safe(lambda: self.t.record(self.recording))
-        self._rec_t0 = time.time() if self.recording else None
-        self.audio.camera_record(self.recording)
-        self.update_rec()
-        self.update_rec_pill()
+        target = not self.recording
+        transport = self.t
+        self.rec.setEnabled(False)
+
+        def confirmed(_value):
+            self.rec.setEnabled(True)
+            self.recording = target
+            self._rec_t0 = time.time() if target else None
+            self.audio.camera_record(target)
+            self.update_rec()
+            self.update_rec_pill()
+
+        def rejected(error):
+            self.rec.setEnabled(True)
+            if isinstance(error, NotSupported):
+                self.flash(f"Not supported over {transport.name}")
+            else:
+                self.flash(f"Record command failed: {error}")
+
+        self.run_camera("record", lambda: transport.record(target), confirmed, rejected)
 
     def update_rec(self):
         self.rec.setText("■ Stop" if self.recording else "● Rec")
@@ -553,21 +689,40 @@ class MainWindow(QMainWindow):
             self.files.refresh()
 
     def next_frame(self):
+        if not self.t:
+            return
+        transport = self.t
+        want_info = (self.ov_hist.isChecked() or self.ov_af.isChecked()) and "liveview_info" in self.caps
+        self._info_tick += 1
+        fetch_info = want_info and (self._info is None or self._info_tick % 3 == 0)
+
+        def fetch():
+            return transport.liveview_frame(), transport.liveview_info() if fetch_info else None
+
+        self.run_camera("liveview", fetch, lambda result: self.show_frame(result, want_info), self.liveview_failed)
+
+    def liveview_failed(self, error):
+        self.live.stop()
+        if self._want and not isinstance(error, NotSupported):
+            self.connection_lost(str(error)[:60])
+        else:
+            self.flash(f"Live view stopped: {error}")
+
+    def show_frame(self, result, want_info):
+        if not self.t:
+            return
+        jpg, info = result
+        if info is not None:
+            self._info = info
         try:
-            jpg = self.t.liveview_frame()
-            want_info = (self.ov_hist.isChecked() or self.ov_af.isChecked()) and "liveview_info" in self.caps
             if self.lut is not None or want_info or self.ov_peak.isChecked() or self.ov_zebra.isChecked():
                 frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
                 if self.lut is not None:
                     frame = apply_lut(frame, self.lut)
                 frame = self.apply_overlays(frame, want_info)
                 jpg = cv2.imencode(".jpg", frame)[1].tobytes()
-        except Exception as e:
-            self.live.stop()
-            if self._want and not isinstance(e, NotSupported):
-                self.connection_lost(str(e)[:60])
-            else:
-                self.flash(f"Live view stopped: {e}")
+        except Exception as error:
+            self.liveview_failed(error)
             return
         pix = QPixmap.fromImage(QImage.fromData(jpg))
         self.preview.setPixmap(pix.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
@@ -581,12 +736,6 @@ class MainWindow(QMainWindow):
             self._zebra_phase = (self._zebra_phase + 2) % 12
             frame = overlays.zebras(frame, phase=self._zebra_phase)
         if want_info:
-            self._info_tick += 1
-            if self._info is None or self._info_tick % 3 == 0:
-                try:
-                    self._info = self.t.liveview_info()
-                except Exception:
-                    self._info = self._info or {}
             info = self._info or {}
             if self.ov_af.isChecked():
                 frame = overlays.draw_af_frames(frame, info.get("afframe", []), info.get("image", {}))
@@ -596,6 +745,7 @@ class MainWindow(QMainWindow):
         return frame
 
     def closeEvent(self, e):
+        self.io.shutdown()
         self.audio.shutdown()
         self._want = None
         self.retry.stop()
@@ -606,6 +756,9 @@ class MainWindow(QMainWindow):
 
 
 def run():
+    from studio_utility.diagnostics import configure_logging
+    configure_logging()
+    log.info("Studio Utility starting")
     migrate()  # one-time carry-over of settings from the camctl name
     app = QApplication(sys.argv)
     app.setApplicationName("Studio Utility")

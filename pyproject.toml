@@ -23,6 +23,9 @@ dependencies = [
 framegen = ["rife-ncnn-vulkan-python", "pillow"]
 gphoto = ["gphoto2>=2.5"]   # macOS/Linux USB fallback
 
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
 [project.scripts]
 studio-utility = "studio_utility.__main__:main"
 
