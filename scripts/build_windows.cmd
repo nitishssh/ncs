@@ -7,4 +7,5 @@ cd /d "%~dp0.."
 if exist "%USERPROFILE%\.studio-utility\self_test.txt" del "%USERPROFILE%\.studio-utility\self_test.txt"
 start /wait "" dist\studio-utility\studio-utility.exe --self-test
 type "%USERPROFILE%\.studio-utility\self_test.txt"
+findstr /C:"FAILED" "%USERPROFILE%\.studio-utility\self_test.txt" >nul && (echo Self-test failed & exit /b 1)
 echo Built: %CD%\dist\studio-utility\studio-utility.exe
