@@ -23,7 +23,8 @@ if (-not (Test-Path $py)) { "Not found: $py (run scripts\windows_setup.cmd first
 
 "--- Installing hub dependencies"
 & $py -m pip install -q --disable-pip-version-check -e $root
-if ($LASTEXITCODE) { "pip install failed"; exit 1 }
+# offline is fine when nothing new is needed: the code runs from this folder (editable install)
+if ($LASTEXITCODE) { "WARNING: couldn't update dependencies (offline?) - starting the hub with what's installed" }
 
 # Home networks only: phone hotspot, Thunderbolt link to the Mac, camera router, Tailscale.
 # Every request still needs the pairing token.
