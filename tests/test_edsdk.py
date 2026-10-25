@@ -266,3 +266,10 @@ def test_mode_locked_settings_show_no_bogus_options(t, fake):
     fake.options[codes.PROP["av"]] = [0xF30]
     assert t.get_setting("tv") == {"value": "1/125", "ability": []}
     assert t.get_setting("av")["ability"] == []
+
+
+def test_single_option_means_locked(t, fake):
+    """ISO fixed to auto in P mode: options [auto], value is the live ISO, and setting it answers 'busy'."""
+    fake.options[codes.PROP["iso"]] = [0x00]
+    fake.props[codes.PROP["iso"]] = 0x60
+    assert t.get_setting("iso") == {"value": "800", "ability": []}
