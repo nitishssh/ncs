@@ -10,6 +10,10 @@ class Cancelled(Exception):
     """A long operation (download) was cancelled by the user."""
 
 
+class CameraLost(RuntimeError):
+    """The camera session ended (turned off, unplugged, or it reset the link when its mode dial moved)."""
+
+
 class NotSupported(Exception):
     """Raised when a transport cannot do the requested operation."""
 

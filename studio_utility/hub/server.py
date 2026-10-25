@@ -24,7 +24,7 @@ from pathlib import Path
 from aiohttp import web
 
 from studio_utility import transports
-from studio_utility.core import NotSupported
+from studio_utility.core import CameraLost, NotSupported
 from studio_utility.paths import CONFIG_DIR, migrate
 
 # settings sent to every device on connect; the USB-only ones are skipped when the link lacks them
@@ -165,10 +165,25 @@ class Hub:
         return self.t
 
     async def cam(self, fn, *args):
-        """Run a blocking camera call on the 2-thread pool."""
+        """Run a blocking camera call on the 2-thread pool. A lost session, or three failures in a row, means the
+        camera reset its link (mode dial, cable, power): drop it so connect_loop reconnects within seconds."""
         if self.t is None:
             raise web.HTTPServiceUnavailable(text="camera not connected")
-        return await self.loop.run_in_executor(self.pool, fn, *args)
+        t = self.t
+        try:
+            result = await self.loop.run_in_executor(self.pool, fn, *args)
+        except (NotSupported, ValueError, web.HTTPException):
+            raise
+        except Exception as e:
+            self.call_failures = getattr(self, "call_failures", 0) + 1
+            if isinstance(e, CameraLost) or self.call_failures >= 3:
+                self.call_failures = 0
+                if self.t is t:
+                    threading.Thread(target=self.drop, args=(f"camera reset the link ({e})",), daemon=True).start()
+                raise web.HTTPServiceUnavailable(text="camera reconnecting - try again in a few seconds")
+            raise web.HTTPBadGateway(text=str(e))
+        self.call_failures = 0
+        return result
 
     # ---- camera lifecycle (background threads)
     def connect_loop(self):
@@ -210,6 +225,8 @@ class Hub:
                     continue
                 if ev:
                     self.publish({"type": "camera", **ev})
+                if ev and ev.get("camera_lost"):
+                    self.drop(ev["camera_lost"])  # reconnect on the next pass
             else:
                 time.sleep(5)
                 self.publish({"type": "camera", "status": self.safe_status()})
@@ -221,6 +238,8 @@ class Hub:
             return {}
 
     def drop(self, why: str):
+        if self.t is None:
+            return
         try:
             self.t.disconnect()
         except Exception:

@@ -14,7 +14,8 @@ import time
 from pathlib import Path
 
 from studio_utility import edsdk_codes as codes
-from studio_utility.core import Cancelled, CameraInfo, NotSupported, Transport
+from studio_utility.core import Cancelled, CameraInfo, CameraLost, NotSupported, Transport
+from studio_utility.edsdk_native import EdsError
 
 SETTINGS = ("mode", "iso", "tv", "av", "exposure", "wb", "picture_style",
             # USB-only: not in the camera's Wi-Fi API
@@ -174,7 +175,15 @@ class EDSDKTransport(Transport):
     def _run(self, fn, *args, timeout: float = 30):
         if not self.worker:
             raise RuntimeError("not connected")
-        return self.worker.call(fn, *args, timeout=timeout)
+        try:
+            return self.worker.call(fn, *args, timeout=timeout)
+        except EdsError as e:
+            if e.code in codes.LOST:
+                with self._cv:
+                    self._lost = True
+                    self._cv.notify_all()
+                raise CameraLost(str(e)) from e
+            raise
 
     def connect(self) -> None:
         mac = sys.platform == "darwin" and self._real_sdk

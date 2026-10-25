@@ -199,3 +199,39 @@ def test_device_names_are_readable():
     assert server.device_name("Mozilla/5.0 (Linux; Android 14) ... StudioUtilityAndroid/0.2") == "Android app"
     assert server.device_name("Mozilla/5.0 (Linux; Android 14; Pixel)") == "Android phone"
     assert server.device_name("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)") == "iPhone"
+
+
+def test_hub_reconnects_when_camera_resets_its_link(hub):
+    """A lost session (mode dial moved) or three failures in a row: the hub drops the camera and reconnects."""
+    from studio_utility.core import CameraLost
+    h, base = hub
+    c = client(h, base, "test")
+    old = h.t
+
+    def lost(*a):
+        raise CameraLost("session not open")
+    old.get_setting = lost
+    r = c.get("/api/settings/iso")
+    assert r.status_code == 503 and "reconnecting" in r.text
+    for _ in range(100):  # connect_loop brings up a fresh transport
+        if h.t is not None and h.t is not old:
+            break
+        time.sleep(0.05)
+    assert h.t is not None and h.t is not old
+    assert c.get("/api/settings/iso").status_code == 200
+
+
+def test_hub_survives_one_odd_failure(hub):
+    h, base = hub
+    c = client(h, base, "test")
+    t, calls = h.t, []
+    real = t.get_setting
+
+    def flaky(key):
+        calls.append(key)
+        if len(calls) == 1:
+            raise RuntimeError("device busy")
+        return real(key)
+    t.get_setting = flaky
+    assert c.get("/api/settings/iso").status_code == 502
+    assert c.get("/api/settings/iso").status_code == 200 and h.t is t  # no reconnect for a single hiccup

@@ -273,3 +273,15 @@ def test_single_option_means_locked(t, fake):
     fake.options[codes.PROP["iso"]] = [0x00]
     fake.props[codes.PROP["iso"]] = 0x60
     assert t.get_setting("iso") == {"value": "800", "ability": []}
+
+
+def test_lost_session_is_reported_not_retried(t, fake):
+    """Turning the R50 V's mode dial (C3 -> M) closes the USB session: say so, so the hub reconnects."""
+    from studio_utility.core import CameraLost
+
+    def gone(*a, **k):
+        raise EdsError("property", 0x00002003)  # EDS_ERR_SESSION_NOT_OPEN
+    fake.get_property = gone
+    with pytest.raises(CameraLost):
+        t.get_setting("iso")
+    assert "camera_lost" in t.events(1)
