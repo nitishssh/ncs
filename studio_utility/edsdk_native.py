@@ -172,6 +172,11 @@ class Sdk:
         v = c_uint32(value)
         self._ok(self.lib.EdsSetPropertyData(ref, pid, param, 4, byref(v)), f"set property 0x{pid:X}")
 
+    def set_property_data(self, ref, pid: int, data: bytes, param: int = 0):
+        """Strings and structs (WB shift's two int32s), written exactly as given."""
+        buf = ctypes.create_string_buffer(data, len(data))
+        self._ok(self.lib.EdsSetPropertyData(ref, pid, param, len(data), buf), f"set property 0x{pid:X}")
+
     def command(self, cam, cmd: int, param: int = 0):
         self._ok(self.lib.EdsSendCommand(cam, cmd, param), f"command 0x{cmd:X}")
 

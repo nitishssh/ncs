@@ -65,13 +65,43 @@ function renderSettings() {
   for (const k of keys) {
     const d = state.settings[k];
     const ability = d.ability || [];
+    const text = k in TEXT_SETTINGS;
     const row = document.createElement("button");
-    row.className = "row" + (ability.length > 1 ? "" : " locked");
-    row.innerHTML = `<span>${SETTING_NAMES[k]}</span><span class="val">${label(k, d.value)}</span>`;
-    if (ability.length > 1) row.onclick = () => pick(k, d);
+    row.className = "row" + (ability.length > 1 || text ? "" : " locked");
+    row.innerHTML = `<span>${SETTING_NAMES[k]}</span><span class="val">${text ? d.value : label(k, d.value)}</span>`;
+    if (text) row.onclick = () => editText(k, d);
+    else if (ability.length > 1) row.onclick = () => pick(k, d);
     else row.title = "Locked in the camera's current mode";
     list.appendChild(row);
   }
+  if ((state.caps || []).includes("focus_drive")) list.appendChild(focusRow());
+}
+
+// Manual focus nudge (USB): ‹ nearer, › farther; more arrows = bigger step
+function focusRow() {
+  const row = document.createElement("div");
+  row.className = "row focusdrive";
+  row.innerHTML = `<span>Focus</span><span class="steps"></span>`;
+  for (const [step, t] of [[-3, "‹‹‹"], [-2, "‹‹"], [-1, "‹"], [1, "›"], [2, "››"], [3, "›››"]]) {
+    const b = document.createElement("button");
+    b.textContent = t;
+    b.setAttribute("aria-label", `${step < 0 ? "Nearer" : "Farther"} ${Math.abs(step)}`);
+    b.onclick = async () => {
+      haptic();
+      try { await api("focus", { step }); } catch (e) { toast(`Focus: ${e.message}`); }
+    };
+    row.querySelector(".steps").appendChild(b);
+  }
+  return row;
+}
+
+async function editText(key, d) {
+  const n = TEXT_SETTINGS[key];
+  const v = prompt(`${SETTING_NAMES[key]} (${n} letters/digits)`, d.value);
+  if (v === null) return;
+  if (v.length !== n) return toast(`${SETTING_NAMES[key]} needs exactly ${n} characters`);
+  try { await api("settings/" + key, { value: v.toUpperCase() }, "PUT"); }
+  catch (e) { toast(`Couldn't set ${SETTING_NAMES[key]}: ${e.message}`); }
 }
 
 const QUICK = { movie_size: "Movie", tv: "Shutter", av: "Aperture", iso: "ISO", exposure: "Exposure", wb: "WB" };

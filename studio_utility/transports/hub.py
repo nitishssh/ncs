@@ -126,6 +126,9 @@ class HubTransport(Transport):
     def half_press(self) -> None:
         self._call("POST", "/api/focus", json={})
 
+    def focus_drive(self, step: int) -> None:
+        self._call("POST", "/api/focus", json={"step": step})
+
     def get_setting(self, key: str) -> dict:
         return self._call("GET", f"/api/settings/{key}").json()
 

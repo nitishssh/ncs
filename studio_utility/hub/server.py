@@ -26,6 +26,10 @@ from studio_utility import transports
 from studio_utility.core import NotSupported
 from studio_utility.paths import CONFIG_DIR, migrate
 
+# settings sent to every device on connect; the USB-only ones are skipped when the link lacks them
+SNAPSHOT = ("movie_size", "iso", "tv", "av", "exposure", "wb", "af_method", "picture_style",
+            "zoom_speed", "color_temp", "wb_shift_ab", "wb_shift_gm", "color_filter", "movie_servo_af",
+            "clip_prefix", "clip_name")
 WEB = Path(__file__).parent / "web"
 CONFIG = CONFIG_DIR / "hub.json"
 CACHE = CONFIG_DIR / "hub-cache"
@@ -169,7 +173,7 @@ class Hub:
                     caps = t.capabilities()
                     info = t.info()
                     settings = {}
-                    for key in ("movie_size", "iso", "tv", "av", "exposure", "wb", "af_method", "picture_style"):
+                    for key in SNAPSHOT:
                         try:
                             settings[key] = t.get_setting(key)
                         except Exception:
@@ -357,6 +361,8 @@ class Hub:
         body = await request.json()
         if "x" in body:
             return await self.act(request, "focus", self.cam_t.focus_at, float(body["x"]), float(body["y"]))
+        if "step" in body:  # manual focus nudge (USB)
+            return await self.act(request, "focus", self.cam_t.focus_drive, int(body["step"]))
         return await self.act(request, "focus", self.cam_t.half_press)
 
     async def api_setting(self, request):

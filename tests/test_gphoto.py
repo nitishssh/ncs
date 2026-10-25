@@ -54,8 +54,15 @@ class FakeCamera:
                 W("whitebalance", "Auto", ["Auto", "Daylight", "Shadow"]),
                 W("picturestyle", "Auto", ["Auto", "Standard", "Fine Detail", "User defined 1"]),
                 W("autoexposuremodedial", "Manual", ["P", "TV", "AV", "Manual"]),
-                W("canonlog", "Off", ["Off", "Canon Log 3"], label="Canon Log")]),  # what we hope to find
+                W("canonlog", "Off", ["Off", "Canon Log 3"], label="Canon Log"),  # what we hope to find
+                W("zoomspeed", "8", [str(n) for n in range(1, 16)]),
+                W("colortemperature", "5200", ["2500", "5200", "10000"]),
+                W("whitebalanceadjusta", "0", [str(n) for n in range(-9, 10)]),
+                W("whitebalanceadjustb", "0", [str(n) for n in range(-9, 10)]),
+                W("movieservoaf", "On", ["Off", "On"])]),
             W("actions", children=[W("eosremoterelease", "None", ["None", "Press Half", "Release Half"]),
+                                   W("manualfocusdrive", "None", ["Near 1", "Near 2", "Near 3", "None",
+                                                                  "Far 1", "Far 2", "Far 3"]),
                                    W("movie", 0)])])
         self.threads, self.sets, self.events = set(), [], []
         self.files = {"/store_00020001/DCIM/100CANON": ["IMG_0001.JPG", "MVI_0002.MP4"]}
@@ -178,3 +185,17 @@ def test_busy_device_message_explains_ptpcamera():
     t = GPhotoTransport(camera_factory=busy)
     with pytest.raises(RuntimeError, match="killall PTPCamera"):
         t.connect()
+
+
+def test_usb_only_controls(t, cam):
+    assert t.get_setting("movie_servo_af") == {"value": "on", "ability": ["off", "on"]}
+    assert t.get_setting("wb_shift_ab")["value"] == "0" and t.get_setting("zoom_speed")["value"] == "8"
+    t.set_setting("movie_servo_af", "off")
+    t.set_setting("wb_shift_gm", "-4")
+    t.set_setting("color_temp", "2500")
+    t.focus_drive(-2)
+    t.focus_drive(3)
+    assert [("movieservoaf", "Off"), ("whitebalanceadjustb", "-4"), ("colortemperature", "2500"),
+            ("manualfocusdrive", "Near 2"), ("manualfocusdrive", "Far 3")] == cam.sets[-5:]
+    with pytest.raises(NotSupported):
+        t.get_setting("color_filter")  # libgphoto2 doesn't expose it; Canon's EDSDK does

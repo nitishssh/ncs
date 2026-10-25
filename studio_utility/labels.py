@@ -44,6 +44,12 @@ def label(key: str, value) -> str:
     v = str(value)
     if key == "movie_size":
         return _movie_quality(v) or v
+    if key == "color_temp" and v.isdigit():
+        return f"{v} K"
+    if key in ("wb_shift_ab", "wb_shift_gm") and re.fullmatch(r"-?\d", v):
+        n = int(v)
+        low, high = ("B", "A") if key == "wb_shift_ab" else ("M", "G")
+        return "0" if n == 0 else f"{low if n < 0 else high}{abs(n)}"
     if key == "exposure":
         return _exposure(v) or v
     if key == "av" and v.startswith("f") and not v.startswith("f/"):

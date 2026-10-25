@@ -126,3 +126,7 @@ button:disabled { opacity: .35; pointer-events: none; }
   .tabs { margin: 0; }
   .controls { margin: 0; gap: 28px; }
 }
+
+.row.focusdrive .steps { display: flex; gap: 6px; }
+.row.focusdrive .steps button { min-width: 40px; padding: 6px 8px; border-radius: 8px; background: var(--panel-solid);
+  color: inherit; border: 1px solid var(--line); font: inherit; }

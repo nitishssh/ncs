@@ -8,7 +8,12 @@ const NAMED = {
 const SETTING_NAMES = {
   movie_size: "Movie size", iso: "ISO", tv: "Shutter", av: "Aperture", exposure: "Exposure comp.",
   wb: "White balance", af_method: "AF method", picture_style: "Picture style",
+  // USB only (Canon EDSDK / gphoto2)
+  zoom_speed: "Zoom speed", color_temp: "Color temperature", wb_shift_ab: "WB shift blue/amber",
+  wb_shift_gm: "WB shift magenta/green", color_filter: "Color filter", movie_servo_af: "Movie Servo AF",
+  clip_prefix: "Clip prefix", clip_name: "Clip name",
 };
+const TEXT_SETTINGS = { clip_prefix: 2, clip_name: 5 };  // free text of exactly this many characters
 
 function label(key, value) {
   const v = String(value);
@@ -25,6 +30,11 @@ function label(key, value) {
       if (m[2] === "0" && !m[3]) return "±0";
       return `${m[1] === "-" ? "−" : "+"}${m[2] === "0" && m[3] ? "" : m[2]}${m[3] ? FRACTIONS[m[3]] || "" : ""}`;
     }
+  }
+  if (key === "color_temp" && /^\d+$/.test(v)) return v + " K";
+  if ((key === "wb_shift_ab" || key === "wb_shift_gm") && /^-?\d$/.test(v)) {
+    const n = +v, [lo, hi] = key === "wb_shift_ab" ? ["B", "A"] : ["M", "G"];
+    return n === 0 ? "0" : `${n < 0 ? lo : hi}${Math.abs(n)}`;
   }
   if (key === "av" && /^f\d/.test(v)) return "f/" + v.slice(1);
   if (key === "tv" && /^\d+"\d+$/.test(v)) return v.replace('"', ".") + " s";

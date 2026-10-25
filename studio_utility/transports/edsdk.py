@@ -7,6 +7,7 @@ so labels, presets and the web app work unchanged."""
 from __future__ import annotations
 
 import queue
+import struct
 import sys
 import threading
 import time
@@ -15,7 +16,14 @@ from pathlib import Path
 from studio_utility import edsdk_codes as codes
 from studio_utility.core import Cancelled, CameraInfo, NotSupported, Transport
 
-SETTINGS = ("mode", "iso", "tv", "av", "exposure", "wb", "picture_style")
+SETTINGS = ("mode", "iso", "tv", "av", "exposure", "wb", "picture_style",
+            # USB-only: not in the camera's Wi-Fi API
+            "zoom_speed", "color_temp", "wb_shift_ab", "wb_shift_gm", "color_filter", "clip_prefix", "clip_name")
+WB_SHIFT = {"wb_shift_ab": 0, "wb_shift_gm": 1}  # index into kEdsPropID_WhiteBalanceShift's int32[2]
+
+
+def _pid(key: str) -> int:
+    return codes.PROP["wb_shift"] if key in WB_SHIFT else codes.PROP[key]
 # Property ID ranges scanned by discover(): general, image, capture, live view, and the newer movie/extended IDs
 DISCOVER_RANGES = [(0x0000, 0x0030), (0x0100, 0x0140), (0x0400, 0x0450), (0x0500, 0x0560),
                    (0x01000000, 0x01000500)]
@@ -219,7 +227,16 @@ class EDSDKTransport(Transport):
     def capabilities(self) -> set[str]:
         return super().capabilities() - {"zoom", "zoom_move", "focus_at", "liveview_info"} | {"events", "discover"}
 
+    def _wb_shift(self) -> list[int]:
+        raw = self.sdk.get_property(self.cam, codes.PROP["wb_shift"])
+        return list(struct.unpack("<2i", raw[:8])) if isinstance(raw, bytes) and len(raw) >= 8 else [0, 0]
+
     def _setting(self, key: str) -> dict:
+        if key in codes.TEXT:
+            return {"value": self.sdk.get_property(self.cam, codes.PROP[key]), "ability": [],
+                    "max_length": codes.TEXT[key]}
+        if key in WB_SHIFT:
+            return {"value": str(self._wb_shift()[WB_SHIFT[key]]), "ability": [str(n) for n in range(-9, 10)]}
         pid = codes.PROP[key]
         code = self.sdk.get_property(self.cam, pid)
         try:
@@ -236,7 +253,32 @@ class EDSDKTransport(Transport):
     def set_setting(self, key: str, value: str) -> None:
         if key not in SETTINGS:
             raise NotSupported(f"{key} over USB")
+        if key in codes.TEXT:
+            n = codes.TEXT[key]
+            text = str(value)
+            if len(text) != n or not text.isascii():
+                raise ValueError(f"{key} must be exactly {n} letters/digits")
+            self._run(self.sdk.set_property_data, self.cam, codes.PROP[key], text.upper().encode("ascii"))
+            return
+        if key in WB_SHIFT:
+            n = int(value)
+            if not -9 <= n <= 9:
+                raise ValueError("WB shift goes from -9 to 9")
+
+            def go():
+                pair = self._wb_shift()
+                pair[WB_SHIFT[key]] = n
+                self.sdk.set_property_data(self.cam, codes.PROP["wb_shift"], struct.pack("<2i", *pair))
+            self._run(go)
+            return
         self._run(self.sdk.set_property, self.cam, codes.PROP[key], codes.to_code(key, value))
+
+    def focus_drive(self, step: int) -> None:
+        """Nudge manual focus: -3..-1 closer, 1..3 farther (bigger = coarser). Needs live view on."""
+        if step not in (-3, -2, -1, 1, 2, 3):
+            raise ValueError("focus step is -3..-1 (near) or 1..3 (far)")
+        param = (codes.DRIVE_FAR if step > 0 else codes.DRIVE_NEAR) + abs(step)
+        self._run(self.sdk.command, self.cam, codes.CMD_DRIVE_LENS_EVF, param)
 
     # ---- shooting
     def shoot(self, autofocus: bool = True) -> None:
@@ -361,8 +403,7 @@ class EDSDKTransport(Transport):
             out["added"] = added
         if lost:
             out["camera_lost"] = "camera turned off or unplugged"
-        by_pid = {codes.PROP[k]: k for k in SETTINGS}
-        keys = [by_pid[p] for p in changes if p in by_pid]
+        keys = [k for k in SETTINGS if _pid(k) in changes]
         if keys:
             out["settings"] = {k: self.get_setting(k) for k in keys}
         if codes.PROP["battery"] in changes or codes.PROP["shots_left"] in changes:

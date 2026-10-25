@@ -33,10 +33,16 @@ log = logging.getLogger(__name__)
 PHOTO = ["mode", "tv", "av", "iso", "exposure", "wb", "af_method"]
 MOVIE = ["movie_mode", "movie_size", "movie_format", "movie_af"]
 COLOR = ["canon_log", "picture_style", "log_assist", "hdr_pq"]
+USB = ["zoom_speed", "color_temp", "wb_shift_ab", "wb_shift_gm", "color_filter", "movie_servo_af",
+       "clip_prefix", "clip_name"]  # only over USB (Canon EDSDK / gphoto2)
+TEXT = {"clip_prefix", "clip_name"}
 LABELS = {"exposure": "Exp. comp", "af_method": "AF method", "mode": "Mode", "tv": "Shutter", "av": "Aperture", "iso": "ISO", "wb": "WB",
           "movie_mode": "Movie mode", "movie_size": "Size / fps", "movie_format": "Format",
           "movie_af": "Movie AF", "canon_log": "Canon Log", "picture_style": "Picture Style",
-          "log_assist": "View Assist", "hdr_pq": "HDR PQ"}
+          "log_assist": "View Assist", "hdr_pq": "HDR PQ",
+          "zoom_speed": "Zoom speed", "color_temp": "Color temp", "wb_shift_ab": "WB shift B/A",
+          "wb_shift_gm": "WB shift M/G", "color_filter": "Color filter", "movie_servo_af": "Servo AF",
+          "clip_prefix": "Clip prefix", "clip_name": "Clip name"}
 DEFAULT_ARG = {"hub": "", "mock": "", "wifi": "10.11.0.2:8090", "ble": "", "usb-edsdk": "", "usb-gphoto": "", "video": "0"}
 
 STYLE = """
@@ -187,6 +193,21 @@ class MainWindow(QMainWindow):
         self.lut_btn.setMenu(lut_menu)
         color.layout().addWidget(self.lut_btn, 1, len(COLOR))
         self.tabs.addTab(color, "Color")
+        usb = self.settings_grid(USB)
+        focus_row = QHBoxLayout()
+        cap = QLabel("Focus")
+        cap.setObjectName("cap")
+        focus_row.addWidget(cap)
+        self.focus_btns = []
+        for step, text in ((-3, "‹‹‹"), (-2, "‹‹"), (-1, "‹"), (1, "›"), (2, "››"), (3, "›››")):
+            b = QPushButton(text)
+            b.setToolTip(f"{'Nearer' if step < 0 else 'Farther'}, {'fine' if abs(step) == 1 else 'medium' if abs(step) == 2 else 'coarse'} step (live view on)")
+            b.clicked.connect(lambda _c=False, s=step: self.focus_drive(s))
+            self.focus_btns.append(b)
+            focus_row.addWidget(b)
+        focus_row.addStretch()
+        usb.layout().addLayout(focus_row, 2, 0, 1, len(USB))
+        self.usb_tab = self.tabs.addTab(usb, "USB")
         self.tools = ToolsTab(lambda: {k: b.currentData() for k, b in self.boxes.items()
                                        if b.isEnabled() and b.currentData() is not None})
         self.tools.message.connect(self.flash)
@@ -260,7 +281,11 @@ class MainWindow(QMainWindow):
             cap = QLabel(LABELS[key])
             cap.setObjectName("cap")
             box = QComboBox()
-            box.currentIndexChanged.connect(lambda i, k=key, b=box: self.change_setting(k, b.itemData(i)))
+            if key in TEXT:  # free text, written when editing finishes
+                box.setEditable(True)
+                box.lineEdit().editingFinished.connect(lambda k=key, b=box: self.change_setting(k, b.currentText()))
+            else:
+                box.currentIndexChanged.connect(lambda i, k=key, b=box: self.change_setting(k, b.itemData(i)))
             self.boxes[key] = box
             grid.addWidget(cap, 0, i)
             grid.addWidget(box, 1, i)
@@ -278,6 +303,8 @@ class MainWindow(QMainWindow):
                  self.wide_btn: "zoom_move", self.tele_btn: "zoom_move"}
         for w, cap in gates.items():
             w.setEnabled(on and cap in self.caps)
+        for b in self.focus_btns:
+            b.setEnabled(on and "focus_drive" in self.caps)
         # Show the slider for positional zoom, W/T buttons for continuous zoom
         positional = "zoom" in self.caps or not on
         for w in (self.zoom, self.zoom_w, self.zoom_t):
@@ -535,6 +562,8 @@ class MainWindow(QMainWindow):
                 box.setEnabled(False)
                 box.setToolTip("Locked in the camera's current shooting mode (use P, Tv, Av or M)" if error == "locked"
                                else "Not available on this camera or connection")
+        usb = any(settings.get(k, (None,))[0] is not None for k in USB) or "focus_drive" in self.caps
+        self.tabs.setTabVisible(self.usb_tab, usb)  # Wi-Fi has none of these
         self.loading = False
 
     def refresh_status(self):
@@ -641,6 +670,12 @@ class MainWindow(QMainWindow):
             transport = self.t
             self.run_camera(f"setting:{key}", lambda: transport.set_setting(key, value),
                             failed=lambda error: (self.flash(f"Error: {error}"), self.load_settings()))
+
+    def focus_drive(self, step: int):
+        if self.t and "focus_drive" in self.caps:
+            transport = self.t
+            self.run_camera("focus-drive", lambda: transport.focus_drive(step),
+                            failed=lambda error: self.flash(f"Focus: {error}"))
 
     def focus_at(self, x: float, y: float):
         if self.t and "focus_at" in self.caps:

@@ -22,6 +22,10 @@ CONFIG = {
     "exposure": ["exposurecompensation"], "wb": ["whitebalance"], "picture_style": ["picturestyle"],
     "mode": ["autoexposuremodedial", "autoexposuremode", "expprogram"], "af_method": ["focusmode"],
     "drive": ["drivemode"],
+    # USB-only: not in the camera's Wi-Fi API
+    "zoom_speed": ["zoomspeed"], "color_temp": ["colortemperature"],
+    "wb_shift_ab": ["whitebalanceadjusta"], "wb_shift_gm": ["whitebalanceadjustb"],
+    "movie_servo_af": ["movieservoaf"],
 }
 WB = {"Auto": "auto", "AWB White": "awbwhite", "Daylight": "daylight", "Shadow": "shade", "Shade": "shade",
       "Cloudy": "cloudy", "Tungsten": "tungsten", "Fluorescent": "fluorescent", "Flash": "flash",
@@ -58,6 +62,8 @@ def to_raw(key: str, v: str) -> str:
         return f"userdef{u[1]}" if u else s.lower().replace(" ", "")
     if key == "mode":
         return MODE.get(s, s)
+    if key == "movie_servo_af":
+        return s.lower()
     return s
 
 
@@ -180,6 +186,12 @@ class GPhotoTransport(Transport):
         w = self.cam.get_single_config(name)
         w.set_value(value)
         self.cam.set_single_config(name, w)
+
+    def focus_drive(self, step: int) -> None:
+        """Nudge manual focus: -3..-1 nearer, 1..3 farther. Needs live view on."""
+        if step not in (-3, -2, -1, 1, 2, 3):
+            raise ValueError("focus step is -3..-1 (near) or 1..3 (far)")
+        self._run(self._set_named, "manualfocusdrive", f"{'Far' if step > 0 else 'Near'} {abs(step)}")
 
     # ---- shooting
     def shoot(self, autofocus: bool = True) -> None:

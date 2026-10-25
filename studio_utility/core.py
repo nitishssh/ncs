@@ -97,8 +97,12 @@ class Transport(ABC):
         """Autofocus without releasing the shutter."""
         raise NotSupported(f"{self.name}: half_press")
 
+    def focus_drive(self, step: int) -> None:
+        """Nudge manual focus: -3..-1 nearer, 1..3 farther (bigger steps are coarser)."""
+        raise NotSupported(f"{self.name}: focus_drive")
+
     def capabilities(self) -> set[str]:
         """Features this transport implements, so the UI can hide the rest."""
         feats = {"get_setting", "set_setting", "liveview_frame", "list_files", "download", "record",
-                 "status", "zoom", "zoom_move", "focus_at", "half_press", "liveview_info", "thumbnail", "wait_new_files", "events"}
+                 "status", "zoom", "zoom_move", "focus_at", "half_press", "focus_drive", "liveview_info", "thumbnail", "wait_new_files", "events"}
         return {f for f in feats if getattr(type(self), f) is not getattr(Transport, f)}

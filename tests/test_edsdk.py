@@ -23,8 +23,12 @@ class FakeSdk:
         self.props = {P["product_name"]: "Canon EOS R50 V", P["firmware"]: "1.2.0", P["battery"]: 0xFFFFFFFF,
                       P["shots_left"]: 2955, P["iso"]: 0x60, P["tv"]: 0x70, P["av"]: 0x28, P["mode"]: 3,
                       P["exposure"]: 0x00, P["wb"]: 1, P["picture_style"]: 0x87, P["evf_output"]: 1,
-                      P["record"]: 0, 0x01000123: 7}  # an unnamed property for discover()
-        self.options = {P["iso"]: [0x00, 0x48, 0x60, 0x68], P["tv"]: [0x65, 0x70, 0x78], P["wb"]: [0, 1, 8]}
+                      P["record"]: 0, 0x01000123: 7,  # an unnamed property for discover()
+                      P["zoom_speed"]: 8, P["color_temp"]: 5200, P["color_filter"]: 6,
+                      P["wb_shift"]: b"\x00" * 8, P["clip_prefix"]: "A_", P["clip_name"]: "CANON"}
+        self.options = {P["iso"]: [0x00, 0x48, 0x60, 0x68], P["tv"]: [0x65, 0x70, 0x78], P["wb"]: [0, 1, 8],
+                        P["zoom_speed"]: list(range(1, 16)), P["color_temp"]: list(range(2500, 10001, 100)),
+                        P["color_filter"]: [0, 1, 6, 14]}
         self.tree = {CAM: [VOL], VOL: [DCIM], DCIM: [FOLDER], FOLDER: [IMG, MOV]}
         self.files = {VOL: ("card1", 0, True), DCIM: ("DCIM", 0, True), FOLDER: ("100CANON", 0, True),
                       IMG: ("IMG_0001.JPG", 3_500_000, False), MOV: ("MVI_0002.MP4", 1_200_000, False)}
@@ -62,6 +66,11 @@ class FakeSdk:
         self._t()
         self.sets.append((pid, value))
         self.props[pid] = value
+
+    def set_property_data(self, ref, pid, data, param=0):
+        self._t()
+        self.sets.append((pid, data))
+        self.props[pid] = data.decode() if pid in (codes.PROP["clip_prefix"], codes.PROP["clip_name"]) else data
 
     def command(self, cam, cmd, param=0):
         self._t()
@@ -209,3 +218,43 @@ def test_codes_round_trip():
         for code, value in codes.TABLES[key].items():
             assert codes.to_value(key, codes.to_code(key, value)) == value
     assert codes.to_value("iso", 0x12345) == "0x12345" and codes.to_code("iso", "0x12345") == 0x12345
+
+
+def test_usb_only_controls(t, fake):
+    assert t.get_setting("zoom_speed") == {"value": "8", "ability": [str(n) for n in range(1, 16)]}
+    assert t.get_setting("color_temp")["value"] == "5200"
+    assert t.get_setting("color_filter") == {"value": "story_teal_orange",
+                                             "ability": ["off", "pale_teal_orange", "story_teal_orange", "accent_red"]}
+    t.set_setting("zoom_speed", "15")
+    t.set_setting("color_temp", "3200")
+    t.set_setting("color_filter", "accent_red")
+    P = codes.PROP
+    assert fake.props[P["zoom_speed"]] == 15 and fake.props[P["color_temp"]] == 3200 and fake.props[P["color_filter"]] == 14
+
+
+def test_wb_shift_writes_both_axes(t, fake):
+    import struct
+    assert t.get_setting("wb_shift_ab") == {"value": "0", "ability": [str(n) for n in range(-9, 10)]}
+    t.set_setting("wb_shift_ab", "-3")
+    t.set_setting("wb_shift_gm", "2")
+    assert struct.unpack("<2i", fake.props[codes.PROP["wb_shift"]]) == (-3, 2)
+    assert t.get_setting("wb_shift_ab")["value"] == "-3"
+    with pytest.raises(ValueError):
+        t.set_setting("wb_shift_gm", "10")
+
+
+def test_clip_names_are_fixed_length_text(t, fake):
+    assert t.get_setting("clip_name") == {"value": "CANON", "ability": [], "max_length": 5}
+    t.set_setting("clip_name", "vlog1")
+    assert (codes.PROP["clip_name"], b"VLOG1") in fake.sets  # no trailing NUL: Canon's sample sends none
+    with pytest.raises(ValueError):
+        t.set_setting("clip_prefix", "ABC")
+
+
+def test_focus_drive_steps(t, fake):
+    for step in (-3, -1, 1, 3):
+        t.focus_drive(step)
+    assert fake.commands == [(codes.CMD_DRIVE_LENS_EVF, p) for p in (0x3, 0x1, 0x8001, 0x8003)]
+    assert "focus_drive" in t.capabilities()
+    with pytest.raises(ValueError):
+        t.focus_drive(0)

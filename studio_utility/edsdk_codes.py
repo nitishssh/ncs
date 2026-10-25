@@ -28,7 +28,16 @@ PROP = {
     "evf_mode": 0x00000501,
     "evf_af_mode": 0x0000050E,
     "record": 0x00000510,        # movie: 4 = start, 0 = stop
+    # USB-only controls (not in the Wi-Fi API)
+    "zoom_speed": 0x00000444,    # power zoom speed 1-15
+    "color_temp": 0x00000107,    # Kelvin, used when WB = colour temperature
+    "wb_shift": 0x00000108,      # int32[2]: amber/blue, green/magenta, -9..9 each
+    "color_filter": 0x0000047F,
+    "clip_prefix": 0x000004E5,   # movie file name: 2 characters ("A_")
+    "clip_name": 0x000004E8,     # movie file name: 5 user characters
 }
+TEXT = {"clip_prefix": 2, "clip_name": 5}  # string properties and their fixed length
+NUMERIC = {"zoom_speed", "color_temp"}     # value is the number itself
 
 # ---- commands
 CMD_TAKE_PICTURE = 0x00000000
@@ -38,6 +47,7 @@ CMD_DO_EVF_AF = 0x00000102
 CMD_DRIVE_LENS_EVF = 0x00000103
 SHUTTER_OFF, SHUTTER_HALF, SHUTTER_FULL = 0, 1, 3
 EVF_OUTPUT_PC = 2
+DRIVE_NEAR, DRIVE_FAR = 0x0000, 0x8000  # kEdsEvfDriveLens_Near1..3 / Far1..3 = base + 1..3
 RECORD_START, RECORD_STOP = 4, 0
 SAVE_TO_CAMERA = 1
 
@@ -103,11 +113,18 @@ PICTURE_STYLE = {0x81: "standard", 0x82: "portrait", 0x83: "landscape", 0x84: "n
 MODE = {0: "P", 1: "Tv", 2: "Av", 3: "M", 4: "bulb", 7: "C1", 16: "C2", 17: "C3", 9: "auto",
         19: "flexible", 20: "movie", 22: "scene_auto", 0xFFFFFFFF: "unknown"}
 
-TABLES = {"iso": ISO, "av": AV, "tv": TV, "exposure": EXPOSURE, "wb": WB, "picture_style": PICTURE_STYLE,
+COLOR_FILTER = {0: "off", 1: "pale_teal_orange", 2: "retro_green", 3: "sepia", 4: "story_blue",
+                5: "story_magenta", 6: "story_teal_orange", 7: "clear_light_blue", 8: "clear_purple",
+                9: "clear_amber", 10: "bright_white", 11: "bright_amber", 12: "tasty_cool", 13: "tasty_warm",
+                14: "accent_red"}  # names from Canon's MultiCamCui sample
+
+TABLES = {"color_filter": COLOR_FILTER, "iso": ISO, "av": AV, "tv": TV, "exposure": EXPOSURE, "wb": WB, "picture_style": PICTURE_STYLE,
           "mode": MODE}
 
 
 def to_value(key: str, code: int) -> str:
+    if key in NUMERIC:
+        return str(code)
     table = TABLES.get(key, {})
     return table.get(code, f"0x{code:X}")
 
@@ -116,6 +133,8 @@ def to_code(key: str, value: str) -> int:
     """Raw value ("1/125", or "0x70" for codes we have no name for) -> EDSDK code."""
     if value.startswith("0x"):
         return int(value, 16)
+    if key in NUMERIC:
+        return int(value)
     for code, v in TABLES.get(key, {}).items():
         if v == value:
             return code
