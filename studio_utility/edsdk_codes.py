@@ -59,7 +59,7 @@ ERR = {
     0x00008D01: "take picture: AF failed", 0x00008D07: "take picture: card error",
     0x00008D08: "take picture: no card", 0x0000A105: "session not open",
 }
-ERR_DEVICE_BUSY, ERR_OBJECT_NOTREADY, ERR_NOT_SUPPORTED = 0x81, 0xA102, 0x05
+ERR_DEVICE_BUSY, ERR_OBJECT_NOTREADY, ERR_NOT_SUPPORTED = 0x81, 0xA102, 0x07
 
 # ---- value tables: EDSDK code <-> CCAPI-style raw value
 ISO = {0x00: "auto", 0x40: "50", 0x48: "100", 0x4B: "125", 0x4D: "160", 0x50: "200", 0x53: "250", 0x55: "320",
