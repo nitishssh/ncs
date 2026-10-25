@@ -179,6 +179,8 @@ def _close_leftover():
 
 
 class EDSDKTransport(Transport):
+    EVF_STALL = 4.0      # s without a frame after starting live view before re-arming it
+    EVF_REARM_GAP = 1.0  # s PC output must stay off for the camera to take the restart
     name = "usb-edsdk"
 
     def __init__(self, sdk_factory=None, lib_path: str | None = None):
@@ -196,6 +198,7 @@ class EDSDKTransport(Transport):
         self._added: list[str] = []
         self._lost = False
         self._evf_on = False
+        self._evf_since = 0.0
         self._last_frame: bytes | None = None
         self._rec_since: float | None = None
         self._cv = threading.Condition()
@@ -410,8 +413,9 @@ class EDSDKTransport(Transport):
     # ---- live view
     def _start_evf(self, rearm: bool = False):
         """Canon's StartEvfCommand: live view mode on if the camera has it off, then add the PC as an output.
-        rearm: after a mode change the camera can still report the PC bit while making no images; clearing it
-        first (Canon's EndEvfCommand) makes the next set a real change that restarts live view."""
+        rearm: the camera can report the PC bit while making no images (after a mode-dial change). Measured on
+        the R50 V: turning PC output off, waiting ~1 s, then on restarts live view in 0.1-0.2 s; a shorter gap
+        doesn't take, and re-arming on every frame request keeps live view from ever starting."""
         try:
             if int(self.sdk.get_property(self.cam, codes.PROP["evf_mode"])) == 0:
                 self.sdk.set_property(self.cam, codes.PROP["evf_mode"], 1)
@@ -421,29 +425,45 @@ class EDSDKTransport(Transport):
         current = int(self.sdk.get_property(self.cam, codes.PROP["evf_output"]))
         if rearm and current & codes.EVF_OUTPUT_PC:
             self.sdk.set_property(self.cam, codes.PROP["evf_output"], current & ~codes.EVF_OUTPUT_PC)
-            time.sleep(0.3)
+            self._pause(self.EVF_REARM_GAP)
         self.sdk.set_property(self.cam, codes.PROP["evf_output"], current | codes.EVF_OUTPUT_PC)
         self._evf_on = True
+        self._evf_since = time.monotonic()
+
+    def _pause(self, seconds: float):
+        """Wait on the SDK thread while still delivering camera events (macOS needs its run loop turning)."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            if sys.platform == "darwin" and self._real_sdk:
+                spin_run_loop(0.02)
+            else:
+                time.sleep(0.02)
 
     def _frame(self) -> bytes:
         if not self._evf_on:
             self._start_evf()
-        restarted = False
-        for _ in range(20):  # the first frames after switching live view on are "not ready"
+        deadline = time.monotonic() + 3.0
+        while True:
             try:
                 return self.sdk.download_evf(self.cam)
             except Exception as e:
                 code = getattr(e, "code", None)
-                if code == codes.ERR_CANNOT_MAKE_OBJECT and not restarted:
-                    self._start_evf(rearm=True)  # mode dial moved: the camera stopped live view, restart it
-                    restarted = True
-                    continue
                 if code not in (codes.ERR_OBJECT_NOTREADY, codes.ERR_DEVICE_BUSY, codes.ERR_CANNOT_MAKE_OBJECT):
                     raise
-                if self._last_frame and code != codes.ERR_CANNOT_MAKE_OBJECT:
-                    return self._last_frame
-                time.sleep(0.05)
-        raise RuntimeError("live view didn't start")
+                if code != codes.ERR_CANNOT_MAKE_OBJECT and self._last_frame:
+                    return self._last_frame  # a busy moment mid-stream: keep showing the last frame
+                if code == codes.ERR_CANNOT_MAKE_OBJECT and not (
+                        int(self.sdk.get_property(self.cam, codes.PROP["evf_output"])) & codes.EVF_OUTPUT_PC):
+                    self._start_evf()  # the camera dropped PC output (mode dial): just switch it back on
+                    continue
+                stuck = time.monotonic() - self._evf_since > self.EVF_STALL  # started a while ago, still nothing
+                if code == codes.ERR_CANNOT_MAKE_OBJECT and stuck:
+                    self._start_evf(rearm=True)  # once per stall, with the off-gap the camera needs
+                    deadline = time.monotonic() + 3.0
+                    continue
+                if time.monotonic() > deadline:
+                    raise RuntimeError("live view didn't start (camera: %s)" % codes.error_text(code))
+                self._pause(0.05)
 
     def liveview_frame(self) -> bytes:
         self._last_frame = self._run(self._frame)

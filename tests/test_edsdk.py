@@ -353,8 +353,34 @@ def test_live_view_rearms_when_camera_still_reports_pc_output(t, fake):
             raise EdsError("live view frame", codes.ERR_CANNOT_MAKE_OBJECT)
         return real_evf(cam)
     fake.set_property, fake.download_evf = set_prop, evf
+    t.EVF_STALL, t.EVF_REARM_GAP = 0.2, 0.01
     assert t.liveview_frame().startswith(b"\xff\xd8")
     assert fake.props[P] & codes.EVF_OUTPUT_PC
+
+
+def test_live_view_is_not_rearmed_on_every_request(t, fake):
+    """The regression found on the Mac: re-arming whenever a frame wasn't ready restarted live view every second,
+    so it never came up. While it's starting, the app just waits."""
+    assert t.liveview_frame()
+    P = codes.PROP["evf_output"]
+    toggles = []
+    real_set, real_evf = fake.set_property, fake.download_evf
+    started = time.monotonic()
+
+    def set_prop(ref, pid, value, param=0):
+        if pid == P:
+            toggles.append(value)
+        real_set(ref, pid, value, param)
+
+    def evf(cam):  # the camera needs 0.5 s before the first image
+        if time.monotonic() - started < 0.5:
+            raise EdsError("live view frame", codes.ERR_CANNOT_MAKE_OBJECT)
+        return real_evf(cam)
+    fake.set_property, fake.download_evf = set_prop, evf
+    t._last_frame = None
+    t._evf_since = time.monotonic()
+    assert t.liveview_frame().startswith(b"\xff\xd8")
+    assert toggles == []
 
 
 def test_session_left_open_by_a_timed_out_connect_is_closed_first(fake, monkeypatch):
