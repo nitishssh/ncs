@@ -14,87 +14,93 @@
 <title>Studio Utility</title>
 </head>
 <body>
-<header class="bar">
-  <div class="cam">
-    <span id="dot" class="dot"></span>
-    <div>
-      <div id="model" class="model">Studio Utility</div>
-      <div id="conn" class="sub">Connecting…</div>
-    </div>
-  </div>
-  <div class="pills">
-    <span id="exp" class="pill hidden"></span>
-    <span id="card" class="pill hidden"></span>
-    <span id="bat" class="pill hidden"></span>
-  </div>
+<!-- status strip: who/where on the left, timecode in the middle, power and card on the right (Blackmagic Camera style) -->
+<header class="strip">
+  <div class="who"><span id="dot" class="dot"></span><span id="model" class="model">Studio Utility</span></div>
+  <div id="timecode" class="timecode">STBY</div>
+  <div class="meters"><span id="card" class="meter hidden"></span><span id="bat" class="meter hidden"></span></div>
 </header>
+<div id="conn" class="conn"></div>
 
 <main>
   <section id="view-camera" class="view active">
     <div id="stage" class="stage">
       <img id="live" alt="" draggable="false">
       <div id="empty" class="empty">Waiting for live view</div>
+      <div id="focusring" class="focusring"></div>
+      <div id="lutbadge" class="lutbadge hidden">709</div>
       <div id="nocam" class="nocam hidden">
         <b>Camera not connected</b>
-        <span id="nocam-why" class="sub"></span>
+        <span id="nocam-why" class="muted"></span>
         <ol>
           <li><b>USB:</b> plug the camera into the hub computer, turn its Wi-Fi off, camera on.</li>
           <li><b>Wi-Fi:</b> camera menu → Network → Camera Control API, joined to your router.</li>
         </ol>
-        <span class="sub">This page connects by itself as soon as the camera appears.</span>
+        <span class="muted">Connects by itself as soon as the camera appears.</span>
       </div>
-      <div id="rec" class="rec hidden"><span class="led"></span><span id="rectime">00:00</span></div>
-      <div id="focusring" class="focusring"></div>
-      <div id="lutbadge" class="lutbadge hidden">709 PREVIEW</div>
     </div>
-    <div class="zoom">
-      <button class="chip" data-zoom="wide" aria-label="Zoom out">W</button>
-      <div class="zoomtrack"><div class="zoomhint">Hold to zoom</div></div>
-      <button class="chip" data-zoom="tele" aria-label="Zoom in">T</button>
+
+    <!-- exposure readouts: tap one to change it -->
+    <div id="readouts" class="readouts"></div>
+
+    <div class="tools">
+      <button id="look" class="tool" aria-label="Preview look">LOG</button>
+      <button id="af" class="tool" aria-label="Autofocus">AF</button>
+      <div class="zoom">
+        <button class="tool" data-zoom="wide" aria-label="Zoom out">W</button>
+        <button class="tool" data-zoom="tele" aria-label="Zoom in">T</button>
+      </div>
     </div>
-    <div id="quick" class="quick"></div>
   </section>
 
   <section id="view-settings" class="view">
+    <div class="viewhead"><button class="back" data-view="camera">‹ Camera</button><h2>Settings</h2></div>
     <div id="settings" class="list"></div>
   </section>
 
   <section id="view-files" class="view">
-    <div class="files-head"><span id="filecount" class="sub"></span><button id="reload" class="link">Refresh</button></div>
+    <div class="viewhead"><button class="back" data-view="camera">‹ Camera</button><h2>Card</h2>
+      <button id="reload" class="link">Refresh</button></div>
+    <div id="filecount" class="muted small"></div>
     <div id="files" class="grid"></div>
   </section>
 </main>
 
 <footer class="dock">
-  <nav class="tabs">
-    <button class="tab active" data-view="camera">Camera</button>
-    <button class="tab" data-view="settings">Settings</button>
-    <button class="tab" data-view="files">Files</button>
-  </nav>
-  <div class="controls">
-    <button id="af" class="round small" aria-label="Autofocus">AF</button>
-    <button id="recbtn" class="shutter" aria-label="Record"><span></span></button>
-    <button id="shoot" class="round small" aria-label="Take photo">
-      <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="13" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 8h3l2-2.5h6L17 8h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
-    </button>
-  </div>
+  <button class="nav" data-view="files" aria-label="Files on card">
+    <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="m3.5 15 4.5-4 4 3.5 3-2.5 5.5 4.5"/></svg><span>Card</span></button>
+  <button id="shoot" class="nav" aria-label="Take photo">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="3.8"/><path d="M4 8.2h3.2L9.2 5.6h5.6l2 2.6H20V19H4z"/></svg><span>Photo</span></button>
+  <button id="recbtn" class="shutter" aria-label="Record"><span></span></button>
+  <button class="nav" data-view="camera" aria-label="Camera">
+    <svg viewBox="0 0 24 24"><rect x="3" y="6.5" width="13" height="11" rx="2.5"/><path d="m16 10.5 5-3v9l-5-3z"/></svg><span>Camera</span></button>
+  <button class="nav" data-view="settings" aria-label="Settings">
+    <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Settings</span></button>
 </footer>
 
 <div id="welcome" class="welcome hidden" role="dialog" aria-labelledby="welcome-title">
   <div class="welcome-card">
     <h1 id="welcome-title">Studio Utility</h1>
-    <p class="sub">Your camera, on this phone.</p>
+    <p class="muted">Your camera, on this phone.</p>
     <ul>
       <li><b>Tap the picture</b> to focus there.</li>
-      <li><b>Settings</b> has everything the camera allows remotely.</li>
-      <li><b>Files</b> opens photos and clips straight off the card.</li>
+      <li><b>Tap a readout</b> — shutter, iris, ISO — to change it.</li>
+      <li><b>Card</b> opens photos and clips straight off the camera.</li>
     </ul>
     <p id="welcome-install" class="install"></p>
     <button id="welcome-go" class="primary">Start</button>
   </div>
 </div>
 <div id="toast" class="toast"></div>
-<div id="sheet" class="sheet"><div class="sheet-card"><div id="sheet-title" class="sheet-title"></div><div id="sheet-options"></div><button class="sheet-cancel" id="sheet-cancel">Cancel</button></div></div>
+<!-- value picker: swipe the strip, tap a value -->
+<div id="sheet" class="sheet">
+  <div class="sheet-card">
+    <div class="grabber"></div>
+    <div id="sheet-title" class="sheet-title"></div>
+    <div id="sheet-options" class="picker"></div>
+    <button class="sheet-cancel" id="sheet-cancel">Done</button>
+  </div>
+</div>
 
 <script src="/static/labels.js"></script>
 <script src="/static/app.js"></script>

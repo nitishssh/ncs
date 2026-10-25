@@ -30,18 +30,17 @@ const haptic = () => navigator.vibrate && navigator.vibrate(8);
 function render() {
   const connected = state.connection === "connected";
   $("dot").className = "dot " + (connected ? "on" : String(state.connection || "").startsWith("lost") ? "off" : "");
-  $("model").textContent = state.info?.model || "Studio Utility";
+  $("model").textContent = (state.info?.model || "Studio Utility").replace(/^Canon\s+/, "");
   const noCam = /waiting for camera/.test(String(state.connection || ""));
-  $("conn").textContent = connected ? `Connected · ${(state.info?.firmware && "fw " + state.info.firmware) || ""}`
-    : noCam ? "Hub online · no camera" : state.connection || "Connecting…";
+  // the strip already says "connected"; only explain when something is wrong
+  $("conn").textContent = connected ? "" : noCam ? "Hub online · no camera" : state.connection || "Connecting…";
   const s = state.status || {};
-  const bat = typeof s.battery === "number" ? s.battery : null;  // "" = USB power / charging
-  setPill("bat", bat != null ? `${bat}%` : s.battery === "" ? "🔌" : null, bat != null && bat <= 15);
-  setPill("card", s.card_free_gb != null ? `${s.card_free_gb} GB${s.shots_left ? " · " + s.shots_left : ""}` : null);
-  const e = state.effective || {};
-  setPill("exp", e.tv || e.av || e.iso ? [e.tv && label("tv", e.tv), e.av && label("av", e.av), e.iso && "ISO " + e.iso].filter(Boolean).join("  ") : null);
+  const bat = typeof s.battery === "number" ? s.battery : null;  // null/"" = USB power / charging
+  setMeter("bat", bat != null ? `${bat}%` : connected ? "USB ⚡" : null, bat != null && bat <= 15);
+  setMeter("card", s.card_free_gb != null ? `${s.card_free_gb} GB` : s.shots_left ? `${s.shots_left}` : null);
   const rec = state.recording;
-  $("rec").classList.toggle("hidden", !rec);
+  $("timecode").classList.toggle("rec", !!rec);
+  if (!rec) $("timecode").textContent = connected ? "STBY" : "— —";
   $("recbtn").classList.toggle("on", !!rec);
   for (const id of ["recbtn", "shoot", "af"]) $(id).disabled = !connected;
   const waiting = !connected && /waiting for camera|lost/.test(String(state.connection || ""));
@@ -50,7 +49,7 @@ function render() {
   // power zoom only over Wi-Fi; USB has zoom speed but no zoom drive
   document.querySelector(".zoom").classList.toggle("hidden", connected && !(state.caps || []).includes("zoom_move"));
   renderSettings();
-  renderQuick();
+  renderReadouts();
 }
 // "waiting for camera (usb-edsdk: no camera on USB: ...; wifi: ...)" -> one plain sentence
 function friendlyWhy(c) {
@@ -59,7 +58,7 @@ function friendlyWhy(c) {
   if (/lost/.test(c)) return "The camera turned off or was unplugged.";
   return "Not found yet.";
 }
-function setPill(id, text, warn) {
+function setMeter(id, text, warn) {
   const p = $(id);
   p.classList.toggle("hidden", !text);
   p.classList.toggle("warn", !!warn);
@@ -69,13 +68,14 @@ setInterval(() => {
   const rec = state.recording;
   if (!rec) return;
   const secs = Math.max(0, Math.floor(Date.now() / 1000 - rec.since + (state.clockSkew || 0)));
-  $("rectime").textContent = `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
+  const two = (n) => String(n).padStart(2, "0");
+  $("timecode").textContent = `${two(Math.floor(secs / 3600))}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`;
 }, 250);
 
 function renderSettings() {
   const list = $("settings");
   const keys = Object.keys(SETTING_NAMES).filter((k) => state.settings?.[k]);
-  list.innerHTML = keys.length ? "" : `<div class="row"><span class="sub">Settings appear when the camera is connected</span></div>`;
+  list.innerHTML = keys.length ? "" : `<div class="row"><span class="muted">Settings appear when the camera is connected</span></div>`;
   for (const k of keys) {
     const d = state.settings[k];
     const ability = d.ability || [];
@@ -118,53 +118,64 @@ async function editText(key, d) {
   catch (e) { toast(`Couldn't set ${SETTING_NAMES[key]}: ${e.message}`); }
 }
 
-const QUICK = { movie_size: "Movie", tv: "Shutter", av: "Aperture", iso: "ISO", exposure: "Exposure", wb: "WB" };
-function renderQuick() {
-  const box = $("quick");
+// readouts are narrow: "4K 29.97p" -> "4K 30p", "FHD Crop 59.94p" -> "FHD 60p"
+function compact(k, v) {
+  const t = label(k, v);
+  if (k !== "movie_size") return t;
+  const m = t.match(/^(\S+).*?([\d.]+)p/);
+  return m ? `${m[1]} ${Math.round(parseFloat(m[2]))}p` : t;
+}
+// one row of exposure readouts, pro-camera order
+const READOUTS = [["movie_size", "Format"], ["tv", "Shutter"], ["av", "Iris"], ["iso", "ISO"], ["wb", "WB"], ["exposure", "EV"]];
+function renderReadouts() {
+  const box = $("readouts");
   box.innerHTML = "";
-  // Look: preview Canon Log as graded Rec.709 (the camera keeps recording log)
-  const look = document.createElement("button");
-  look.className = "q" + (lutOn ? " on" : "");
-  look.innerHTML = `<small>Look</small><b>${lutOn ? "Rec.709" : "Log (flat)"}</b>`;
-  look.onclick = () => {
-    lutOn = !lutOn;
-    try { localStorage.setItem("lut", lutOn ? "clog3" : ""); } catch (e) { /* not persisted */ }
-    haptic();
-    toast(lutOn ? "Previewing the graded look – recording stays Canon Log" : "Showing the flat log picture");
-    renderQuick();
-  };
-  box.appendChild(look);
-  $("lutbadge").classList.toggle("hidden", !lutOn);
-  for (const [k, name] of Object.entries(QUICK)) {
+  for (const [k, name] of READOUTS) {
     const d = state.settings?.[k];
     if (!d) continue;
     const open = (d.ability || []).length > 1;
     const b = document.createElement("button");
-    b.className = "q" + (open ? "" : " locked");
-    b.innerHTML = `<small>${name}</small><b>${label(k, d.value)}</b>`;
+    b.className = "ro" + (open ? "" : " locked") + (k === "movie_size" ? " wide" : "");
+    b.innerHTML = `<small>${name}</small><b>${compact(k, d.value)}</b>`;
     b.onclick = () => open ? pick(k, d) : toast(`${SETTING_NAMES[k]} is fixed in the camera's current mode`);
     box.appendChild(b);
   }
+  box.classList.toggle("hidden", !box.children.length);
+  $("look").textContent = lutOn ? "709" : "LOG";
+  $("look").classList.toggle("on", lutOn);
+  $("lutbadge").classList.toggle("hidden", !lutOn);
 }
+// Look: preview Canon Log as graded Rec.709 (the camera keeps recording log)
+$("look").onclick = () => {
+  lutOn = !lutOn;
+  try { localStorage.setItem("lut", lutOn ? "clog3" : ""); } catch (e) { /* not persisted */ }
+  haptic();
+  toast(lutOn ? "Previewing graded Rec.709 – recording stays Canon Log" : "Showing the flat log picture");
+  renderReadouts();
+};
 
 function pick(key, d) {
   $("sheet-title").textContent = SETTING_NAMES[key];
   const box = $("sheet-options");
   box.innerHTML = "";
-  for (const v of d.ability) {
+  const labels = d.ability.map((v) => label(key, v));
+  box.classList.toggle("list-mode", labels.some((t) => t.length > 9));  // names read better as a list
+  let current = null;
+  d.ability.forEach((v, i) => {
     const b = document.createElement("button");
     b.className = "option" + (v === d.value ? " current" : "");
-    b.textContent = label(key, v);
+    b.textContent = labels[i];
+    if (v === d.value) current = b;
     b.onclick = async () => {
-      closeSheet();
+      for (const o of box.children) o.classList.toggle("current", o === b);
       haptic();
-      try {
-        await api("settings/" + key, { value: v }, "PUT");
-      } catch (e) { toast(`Couldn't set ${SETTING_NAMES[key]}: ${e.message}`); }
+      try { await api("settings/" + key, { value: v }, "PUT"); setTimeout(closeSheet, 180); }
+      catch (e) { toast(`Couldn't set ${SETTING_NAMES[key]}: ${e.message}`); }
     };
     box.appendChild(b);
-  }
+  });
   $("sheet").classList.add("show");
+  if (current) requestAnimationFrame(() => current.scrollIntoView({ inline: "center", block: "center" }));
 }
 const closeSheet = () => $("sheet").classList.remove("show");
 $("sheet-cancel").onclick = closeSheet;
@@ -280,14 +291,14 @@ $("shoot").onclick = async () => {
 };
 $("af").onclick = async () => { haptic(); try { await api("focus", {}); toast("Focusing"); } catch (e) { toast("AF: " + e.message); } };
 
-// tabs
-for (const t of document.querySelectorAll(".tab")) {
-  t.onclick = () => {
-    for (const x of document.querySelectorAll(".tab")) x.classList.toggle("active", x === t);
-    for (const v of document.querySelectorAll(".view")) v.classList.toggle("active", v.id === "view-" + t.dataset.view);
-    if (t.dataset.view === "files" && !filesLoaded) loadFiles();
-  };
+// navigation: dock icons and the views' back buttons
+function show(view) {
+  for (const v of document.querySelectorAll(".view")) v.classList.toggle("active", v.id === "view-" + view);
+  for (const n of document.querySelectorAll(".nav[data-view]")) n.classList.toggle("active", n.dataset.view === view);
+  if (view === "files" && !filesLoaded) loadFiles();
 }
+for (const b of document.querySelectorAll("[data-view]")) b.onclick = () => { haptic(); show(b.dataset.view); };
+show("camera");
 
 // files
 let filesLoaded = false;
