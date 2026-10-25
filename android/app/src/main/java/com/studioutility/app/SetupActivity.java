@@ -1,11 +1,9 @@
 package com.studioutility.app;
 
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -33,23 +31,31 @@ public class SetupActivity extends AppCompatActivity {
     private static final int FG = Color.parseColor("#F5F5F7"), SUB = Color.parseColor("#9A9A9F"),
             PANEL = Color.parseColor("#1C1C1E"), ACCENT = Color.parseColor("#0A84FF");
 
+    private Hub hub;
     private Hubs hubs;
     private LinearLayout foundList;
     private TextView foundStatus;
     private final Set<String> found = new LinkedHashSet<>();
     private final ActivityResultLauncher<ScanOptions> scanner = registerForActivityResult(new ScanContract(), r -> {
-        if (r.getContents() != null) usePairingLink(r.getContents());
+        if (r.getContents() != null) pairWith(r.getContents());
     });
 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String link = prefs.getString(LINK, null);
-        if (link != null && !getIntent().getBooleanExtra("change", false)) {
-            openHub(link);
+        hub = new Hub(this);
+        hubs = new Hubs(this);
+        boolean change = getIntent().getBooleanExtra("change", false);
+        if (change) hub.forget();
+        if (hub.paired()) {
+            openHub();
             return;
         }
-        hubs = new Hubs(this);
+        String old = getSharedPreferences(PREFS, MODE_PRIVATE).getString(LINK, null);  // first app version
+        if (old != null) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove(LINK).apply();
+            pairWith(old);
+            return;
+        }
         showWelcome();
     }
 
@@ -97,14 +103,15 @@ public class SetupActivity extends AppCompatActivity {
 
     private void addFound(String url) {
         if (!found.add(url)) return;
-        foundStatus.setText("Found on this network (scan the code to pair):");
+        foundStatus.setText("Studio Hub is on this network. Scan its code to pair:");
         TextView row = text(url.replace("http://", "").replaceAll("/$", ""), 16, FG, false);
         row.setPadding(dp(14), dp(14), dp(14), dp(14));
         row.setBackground(rounded(PANEL));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.topMargin = dp(8);
         row.setLayoutParams(lp);
-        row.setOnClickListener(v -> openHub(url));  // without a token the hub asks to pair
+        row.setOnClickListener(v -> Toast.makeText(this, "Scan the code on that computer (http://localhost:8765/pair) to pair",
+                Toast.LENGTH_LONG).show());
         foundList.addView(row);
     }
 
@@ -123,23 +130,31 @@ public class SetupActivity extends AppCompatActivity {
         input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
         input.setHint("http://192.168.0.100:8765/?token=…");
         new AlertDialog.Builder(this).setTitle("Pairing link").setView(input)
-                .setPositiveButton("Pair", (d, w) -> usePairingLink(input.getText().toString().trim()))
+                .setPositiveButton("Pair", (d, w) -> pairWith(input.getText().toString().trim()))
                 .setNegativeButton("Cancel", null).show();
     }
 
-    private void usePairingLink(String raw) {
-        Uri u = Uri.parse(raw);
-        if (!"http".equals(u.getScheme()) && !"https".equals(u.getScheme()) || u.getQueryParameter("token") == null) {
-            Toast.makeText(this, "That isn't a Studio Hub pairing link", Toast.LENGTH_LONG).show();
-            return;
-        }
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(LINK, raw).apply();
-        openHub(raw);
+    private void pairWith(String link) {
+        if (hubs != null) hubs.stop();
+        LinearLayout page = page();
+        page.addView(text("Pairing…", 26, FG, true));
+        page.addView(text("Finding the hub on this network.", 15, SUB, false));
+        setContentView(scroll(page));
+        new Thread(() -> {
+            try {
+                hub.pair(link);
+                runOnUiThread(this::openHub);
+            } catch (Hub.Problem p) {
+                runOnUiThread(() -> new AlertDialog.Builder(this).setTitle("Couldn't pair").setMessage(p.getMessage())
+                        .setPositiveButton("Scan again", (d, w) -> { showPair(); scan(); })
+                        .setNegativeButton("Back", (d, w) -> showPair()).setCancelable(false).show());
+            }
+        }).start();
     }
 
-    private void openHub(String link) {
+    private void openHub() {
         if (hubs != null) hubs.stop();
-        startActivity(new Intent(this, HubActivity.class).setData(Uri.parse(link)));
+        startActivity(new Intent(this, HubActivity.class));
         finish();
     }
 

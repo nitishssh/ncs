@@ -168,3 +168,34 @@ def test_live_view_graded_preview(hub):
     flat = c.get("/api/live.jpg").content
     graded = c.get("/api/live.jpg", params={"lut": "clog3"}).content
     assert graded[:2] == b"\xff\xd8" and graded != flat  # a different (graded) JPEG, same frame
+
+
+def test_android_app_pairing(hub, monkeypatch):
+    """The app trades the QR's admin secret for its own key, then reaches the hub with only that key."""
+    h, base = hub
+    monkeypatch.setattr(server, "lan_addresses", lambda: ["192.168.0.100", "100.97.69.73"])
+    assert httpx.post(base + "/api/pair", json={}).status_code == 401  # no secret, no key
+    r = httpx.post(base + "/api/pair", json={"name": "Android app"}, headers={"X-Studio-Token": h.token})
+    key = r.json()["device_token"]
+    assert key != h.token and r.json()["hosts"][0].startswith("192.168.0.100:")
+    hello = httpx.get(base + "/api/hello", headers={"X-Studio-Token": key}).json()
+    assert hello["app"] == "studio-utility-hub" and hello["camera"] == "connected"
+    assert httpx.get(base + "/api/state", cookies={"studio_token": key}).status_code == 200  # the WebView's cookie
+    names = [d["name"] for d in httpx.get(base + "/api/devices", headers={"X-Studio-Token": h.token}).json()]
+    assert "Android app" in names
+    # a paired device can't mint more keys
+    assert httpx.post(base + "/api/pair", json={}, headers={"X-Studio-Token": key}).status_code == 403
+
+
+def test_one_pairing_code_lists_every_address(hub, monkeypatch):
+    h, base = hub
+    monkeypatch.setattr(server, "lan_addresses", lambda: ["192.168.0.100", "10.63.196.242", "100.97.69.73"])
+    link = h.pairing_link(8765)
+    assert link.startswith("http://192.168.0.100:8765/?token=") and link.endswith("&hosts=192.168.0.100,10.63.196.242,100.97.69.73")
+    assert parse_link(link) == ("http://192.168.0.100:8765", h.token)  # desktop app still reads it
+
+
+def test_device_names_are_readable():
+    assert server.device_name("Mozilla/5.0 (Linux; Android 14) ... StudioUtilityAndroid/0.2") == "Android app"
+    assert server.device_name("Mozilla/5.0 (Linux; Android 14; Pixel)") == "Android phone"
+    assert server.device_name("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)") == "iPhone"

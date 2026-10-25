@@ -74,7 +74,19 @@ def lan_addresses() -> list[str]:
         s.close()
     except OSError:
         pass
-    return sorted(a for a in out if not a.startswith(("127.", "169.254.")))
+    def rank(a):  # home network first, then other private nets, Tailscale (100.64/10) last
+        return (a.startswith("100."), not a.startswith("192.168."), a)
+    return sorted((a for a in out if not a.startswith(("127.", "169.254."))), key=rank)
+
+
+def device_name(user_agent: str) -> str:
+    """A readable name for the hub's device list instead of 'Mozilla/5.0'."""
+    ua = user_agent or ""
+    for key, name in (("StudioUtilityAndroid", "Android app"), ("iPhone", "iPhone"), ("iPad", "iPad"),
+                      ("Android", "Android phone"), ("Macintosh", "Mac"), ("Windows", "Windows PC")):
+        if key in ua:
+            return name
+    return "Browser"
 
 
 class Hub:
@@ -237,7 +249,9 @@ class Hub:
     @web.middleware
     async def auth(self, request: web.Request, handler):
         if request.path in ("/manifest.webmanifest", "/icon.svg", "/sw.js") or request.path.startswith("/static/"):
-            return await handler(request)
+            resp = await handler(request)
+            resp.headers["Cache-Control"] = "no-cache"  # revalidate: phones get a new page right after an update
+            return resp
         token = (request.query.get("token") or request.headers.get("X-Studio-Token")
                  or request.cookies.get("studio_token")
                  # devices paired before the rename (camctl) keep working
@@ -260,13 +274,19 @@ class Hub:
         resp = await handler(request)
         if admin and request.query.get("token") and request.path == "/":
             # Exchange the administrator QR secret for a unique, revocable browser credential.
-            name = request.headers.get("X-Studio-Device") or request.headers.get("User-Agent", "Browser").split(" ", 1)[0]
+            name = request.headers.get("X-Studio-Device") or device_name(request.headers.get("User-Agent", ""))
             _device_id, device_token = self.issue_device(name)
             resp.set_cookie("studio_token", device_token, max_age=3600 * 24 * 365, httponly=True, samesite="Lax")
         return resp
 
     async def index(self, request):
-        return web.FileResponse(WEB / "index.html")
+        return web.FileResponse(WEB / "index.html", headers={"Cache-Control": "no-cache"})
+
+    def pairing_link(self, port: int) -> str:
+        """One link for every network: the best address opens in a phone browser; the Android app also gets the
+        others (hosts=) and uses whichever answers, so moving between home Wi-Fi, hotspot and Tailscale works."""
+        addrs = lan_addresses()
+        return f"http://{addrs[0]}:{port}/?token={self.token}&hosts={','.join(addrs)}" if addrs else ""
 
     async def pair_page(self, request):
         """QR code for phones: open on the hub machine itself (http://localhost:8765/pair)."""
@@ -275,16 +295,30 @@ class Hub:
         import qrcode
         import qrcode.image.svg
         port = request.url.port or 8765
-        urls = [f"http://{a}:{port}/?token={self.token}" for a in lan_addresses()]
-        blocks = []
-        for u in urls:
-            buf = io.BytesIO()
-            qrcode.make(u, image_factory=qrcode.image.svg.SvgPathImage, box_size=12).save(buf)
-            blocks.append(f'<figure>{buf.getvalue().decode()}<figcaption>{u.split("?")[0]}'
-                          f'<input readonly value="{u}" onclick="this.select()" title="Desktop app: copy this link">'
-                          f'</figcaption></figure>')
-        html = (WEB / "pair.html").read_text().replace("{{codes}}", "".join(blocks))
+        link = self.pairing_link(port)
+        buf = io.BytesIO()
+        qrcode.make(link, image_factory=qrcode.image.svg.SvgPathImage, box_size=12).save(buf)
+        code = (f'<figure>{buf.getvalue().decode()}<figcaption>Works on any of: '
+                f'{", ".join(lan_addresses())}</figcaption></figure>'
+                f'<input readonly value="{link}" onclick="this.select()" title="Desktop app: copy this link">')
+        html = (WEB / "pair.html").read_text().replace("{{codes}}", code)
         return web.Response(text=html, content_type="text/html")
+
+    async def api_hello(self, request):
+        """Cheap reachability check for apps choosing between the hub's addresses."""
+        port = request.url.port or 8765
+        return web.json_response({"app": "studio-utility-hub", "hosts": [f"{a}:{port}" for a in lan_addresses()],
+                                  "camera": self.state.get("connection")})
+
+    async def api_pair(self, request):
+        """Trade the QR's administrator secret for this device's own revocable key (Android app)."""
+        self.require_admin(request)
+        body = await request.json() if request.can_read_body else {}
+        name = str(body.get("name") or device_name(request.headers.get("User-Agent", "")))
+        device_id, token = self.issue_device(name)
+        port = request.url.port or 8765
+        return web.json_response({"device_id": device_id, "device_token": token,
+                                  "hosts": [f"{a}:{port}" for a in lan_addresses()]})
 
     async def api_state(self, request):
         return web.json_response({"seq": self.seq, **self.state, "server_time": time.time()})
@@ -457,6 +491,8 @@ class Hub:
         r.add_get("/", self.index)
         r.add_get("/pair", self.pair_page)
         r.add_get("/api/state", self.api_state)
+        r.add_get("/api/hello", self.api_hello)
+        r.add_post("/api/pair", self.api_pair)
         r.add_get("/api/devices", self.api_devices)
         r.add_put("/api/devices/{device_id}/role", self.api_device_role)
         r.add_delete("/api/devices/{device_id}", self.api_device_revoke)

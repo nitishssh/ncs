@@ -31,7 +31,9 @@ function render() {
   const connected = state.connection === "connected";
   $("dot").className = "dot " + (connected ? "on" : String(state.connection || "").startsWith("lost") ? "off" : "");
   $("model").textContent = state.info?.model || "Studio Utility";
-  $("conn").textContent = connected ? `Connected · ${(state.info?.firmware && "fw " + state.info.firmware) || ""}` : state.connection || "Connecting…";
+  const noCam = /waiting for camera/.test(String(state.connection || ""));
+  $("conn").textContent = connected ? `Connected · ${(state.info?.firmware && "fw " + state.info.firmware) || ""}`
+    : noCam ? "Hub online · no camera" : state.connection || "Connecting…";
   const s = state.status || {};
   const bat = typeof s.battery === "number" ? s.battery : null;  // "" = USB power / charging
   setPill("bat", bat != null ? `${bat}%` : s.battery === "" ? "🔌" : null, bat != null && bat <= 15);
@@ -42,10 +44,20 @@ function render() {
   $("rec").classList.toggle("hidden", !rec);
   $("recbtn").classList.toggle("on", !!rec);
   for (const id of ["recbtn", "shoot", "af"]) $(id).disabled = !connected;
+  const waiting = !connected && /waiting for camera|lost/.test(String(state.connection || ""));
+  $("nocam").classList.toggle("hidden", !waiting);
+  if (waiting) $("nocam-why").textContent = friendlyWhy(String(state.connection));
   // power zoom only over Wi-Fi; USB has zoom speed but no zoom drive
   document.querySelector(".zoom").classList.toggle("hidden", connected && !(state.caps || []).includes("zoom_move"));
   renderSettings();
   renderQuick();
+}
+// "waiting for camera (usb-edsdk: no camera on USB: ...; wifi: ...)" -> one plain sentence
+function friendlyWhy(c) {
+  if (/no camera on USB/.test(c) && /wifi|ccapi|refused|timed out|unreachable/i.test(c)) return "Not found on USB or Wi-Fi.";
+  if (/no camera on USB/.test(c)) return "Not found on the hub's USB.";
+  if (/lost/.test(c)) return "The camera turned off or was unplugged.";
+  return "Not found yet.";
 }
 function setPill(id, text, warn) {
   const p = $(id);

@@ -34,6 +34,15 @@
     <div id="stage" class="stage">
       <img id="live" alt="" draggable="false">
       <div id="empty" class="empty">Waiting for live view</div>
+      <div id="nocam" class="nocam hidden">
+        <b>Camera not connected</b>
+        <span id="nocam-why" class="sub"></span>
+        <ol>
+          <li><b>USB:</b> plug the camera into the hub computer, turn its Wi-Fi off, camera on.</li>
+          <li><b>Wi-Fi:</b> camera menu → Network → Camera Control API, joined to your router.</li>
+        </ol>
+        <span class="sub">This page connects by itself as soon as the camera appears.</span>
+      </div>
       <div id="rec" class="rec hidden"><span class="led"></span><span id="rectime">00:00</span></div>
       <div id="focusring" class="focusring"></div>
       <div id="lutbadge" class="lutbadge hidden">709 PREVIEW</div>
