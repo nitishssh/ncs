@@ -375,16 +375,21 @@ class EDSDKTransport(Transport):
         self._rec_since = time.time() if start else None
 
     # ---- live view
-    def _start_evf(self):
-        """Canon's StartEvfCommand: live view mode on if the camera has it off, then add the PC as an output."""
+    def _start_evf(self, rearm: bool = False):
+        """Canon's StartEvfCommand: live view mode on if the camera has it off, then add the PC as an output.
+        rearm: after a mode change the camera can still report the PC bit while making no images; clearing it
+        first (Canon's EndEvfCommand) makes the next set a real change that restarts live view."""
         try:
             if int(self.sdk.get_property(self.cam, codes.PROP["evf_mode"])) == 0:
                 self.sdk.set_property(self.cam, codes.PROP["evf_mode"], 1)
         except EdsError as e:
             if e.code in codes.LOST:
                 raise
-        current = self.sdk.get_property(self.cam, codes.PROP["evf_output"])
-        self.sdk.set_property(self.cam, codes.PROP["evf_output"], int(current) | codes.EVF_OUTPUT_PC)
+        current = int(self.sdk.get_property(self.cam, codes.PROP["evf_output"]))
+        if rearm and current & codes.EVF_OUTPUT_PC:
+            self.sdk.set_property(self.cam, codes.PROP["evf_output"], current & ~codes.EVF_OUTPUT_PC)
+            time.sleep(0.3)
+        self.sdk.set_property(self.cam, codes.PROP["evf_output"], current | codes.EVF_OUTPUT_PC)
         self._evf_on = True
 
     def _frame(self) -> bytes:
@@ -397,7 +402,7 @@ class EDSDKTransport(Transport):
             except Exception as e:
                 code = getattr(e, "code", None)
                 if code == codes.ERR_CANNOT_MAKE_OBJECT and not restarted:
-                    self._start_evf()  # the camera turned PC output off (mode dial moved): switch it back on
+                    self._start_evf(rearm=True)  # mode dial moved: the camera stopped live view, restart it
                     restarted = True
                     continue
                 if code not in (codes.ERR_OBJECT_NOTREADY, codes.ERR_DEVICE_BUSY, codes.ERR_CANNOT_MAKE_OBJECT):

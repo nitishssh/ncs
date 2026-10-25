@@ -332,3 +332,26 @@ def test_live_view_restarts_after_camera_turned_it_off(t, fake):
     fake.download_evf = evf
     assert t.liveview_frame().startswith(b"\xff\xd8")
     assert fake.props[codes.PROP["evf_output"]] & codes.EVF_OUTPUT_PC and fake.props[codes.PROP["evf_mode"]] == 1
+
+
+def test_live_view_rearms_when_camera_still_reports_pc_output(t, fake):
+    """Seen on the R50 V after C3 -> M: output still reads screen+PC (3) but every frame fails with 0xA104.
+    Only clearing and setting the PC bit again restarts it."""
+    assert t.liveview_frame()
+    P = codes.PROP["evf_output"]
+    fake.props[P] = 3
+    armed = {"ok": False}
+    real_set, real_evf = fake.set_property, fake.download_evf
+
+    def set_prop(ref, pid, value, param=0):
+        if pid == P and not value & codes.EVF_OUTPUT_PC:
+            armed["ok"] = True  # the camera saw live view stop; the next start is real
+        real_set(ref, pid, value, param)
+
+    def evf(cam):
+        if not armed["ok"]:
+            raise EdsError("live view frame", codes.ERR_CANNOT_MAKE_OBJECT)
+        return real_evf(cam)
+    fake.set_property, fake.download_evf = set_prop, evf
+    assert t.liveview_frame().startswith(b"\xff\xd8")
+    assert fake.props[P] & codes.EVF_OUTPUT_PC
