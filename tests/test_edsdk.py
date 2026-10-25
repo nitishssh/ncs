@@ -316,3 +316,19 @@ def test_failed_connect_and_dead_session_still_stop_the_sdk(fake):
     t.disconnect()
     assert fake.running == 0
     EDSDKTransport(sdk_factory=lambda: fake).connect()
+
+
+def test_live_view_restarts_after_camera_turned_it_off(t, fake):
+    """After a mode-dial change the camera drops PC output: frames fail with 0xA104 until it's switched back on."""
+    assert t.liveview_frame().startswith(b"\xff\xd8")
+    fake.props[codes.PROP["evf_output"]] = 1  # camera screen only, PC bit cleared by the camera
+    fake.props[codes.PROP["evf_mode"]] = 0
+    real = fake.download_evf
+
+    def evf(cam):
+        if not fake.props[codes.PROP["evf_output"]] & codes.EVF_OUTPUT_PC:
+            raise EdsError("live view frame", codes.ERR_CANNOT_MAKE_OBJECT)
+        return real(cam)
+    fake.download_evf = evf
+    assert t.liveview_frame().startswith(b"\xff\xd8")
+    assert fake.props[codes.PROP["evf_output"]] & codes.EVF_OUTPUT_PC and fake.props[codes.PROP["evf_mode"]] == 1

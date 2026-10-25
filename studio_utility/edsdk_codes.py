@@ -68,11 +68,13 @@ ERR = {  # from Canon's EDSDKErrors.h (13.20.21)
     0x00000086: "invalid parameter", 0x000000C0: "communication port in use (close EOS Utility)",
     0x000000C1: "camera disconnected", 0x000000C4: "USB bus error", 0x00002003: "session not open",
     0x00002019: "camera busy", 0x0000A102: "object not ready (live view starting)",
+    0x0000A104: "live view not running on the camera",
     0x00008D01: "take picture: AF failed", 0x00008D07: "take picture: card error", 0x00008D08: "take picture: no card",
 }
 # the session is gone (dial turned, cable pulled, camera off): reconnect instead of retrying
 LOST = {0x00000061, 0x00000080, 0x00000082, 0x000000C1, 0x000000C4, 0x00002003}
 ERR_DEVICE_BUSY, ERR_OBJECT_NOTREADY, ERR_NOT_SUPPORTED = 0x81, 0xA102, 0x07
+ERR_CANNOT_MAKE_OBJECT = 0xA104  # live view: no image because PC output is off (e.g. after a mode-dial change)
 
 # ---- value tables: EDSDK code <-> CCAPI-style raw value
 ISO = {0x00: "auto", 0x40: "50", 0x48: "100", 0x4B: "125", 0x4D: "160", 0x50: "200", 0x53: "250", 0x55: "320",
