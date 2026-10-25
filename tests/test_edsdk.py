@@ -191,6 +191,7 @@ def test_missing_sdk_says_what_to_do(tmp_path, monkeypatch):
     from studio_utility import edsdk_native
     monkeypatch.setattr(edsdk_native, "ROOT", tmp_path)
     monkeypatch.setattr(edsdk_native.Path, "home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
     t = EDSDKTransport()
     with pytest.raises(FileNotFoundError, match="EDSDK_TODO"):
         t.connect()

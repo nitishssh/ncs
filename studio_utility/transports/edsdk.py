@@ -7,6 +7,7 @@ so labels, presets and the web app work unchanged."""
 from __future__ import annotations
 
 import queue
+import sys
 import threading
 import time
 from pathlib import Path
@@ -18,6 +19,18 @@ SETTINGS = ("mode", "iso", "tv", "av", "exposure", "wb", "picture_style")
 # Property ID ranges scanned by discover(): general, image, capture, live view, and the newer movie/extended IDs
 DISCOVER_RANGES = [(0x0000, 0x0030), (0x0100, 0x0140), (0x0400, 0x0450), (0x0500, 0x0560),
                    (0x01000000, 0x01000500)]
+
+
+
+def spin_run_loop(seconds: float) -> None:
+    """Turn this thread's macOS run loop: Canon's SDK only sees USB cameras while it turns."""
+    import ctypes
+    cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    cf.CFRunLoopRunInMode.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_bool]
+    mode = ctypes.c_void_p.in_dll(cf, "kCFRunLoopDefaultMode")
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        cf.CFRunLoopRunInMode(mode, 0.02, False)
 
 
 class SdkThread:
@@ -61,11 +74,34 @@ class SdkThread:
         self.thread.join(2)
 
 
+class MainThreadRunner:
+    """macOS: Canon's SDK only finds cameras when called on the main thread, so jobs run inline there (one at a
+    time) and the run loop turns between them. Used by the CLI; same interface as SdkThread."""
+
+    def __init__(self, pump=None):
+        self.pump = pump
+        self.lock = threading.RLock()
+
+    def call(self, fn, *args, timeout: float = 30):
+        with self.lock:
+            spin_run_loop(0.02)
+            if self.pump:
+                try:
+                    self.pump()
+                except Exception:
+                    pass
+            return fn(*args)
+
+    def stop(self):
+        pass
+
+
 class EDSDKTransport(Transport):
     name = "usb-edsdk"
 
     def __init__(self, sdk_factory=None, lib_path: str | None = None):
         """sdk_factory() -> object with edsdk_native.Sdk's methods (tests pass a fake)."""
+        self._real_sdk = sdk_factory is None
         if sdk_factory is None:
             from studio_utility.edsdk_native import Sdk
             sdk_factory = lambda: Sdk(lib_path)  # noqa: E731
@@ -89,7 +125,8 @@ class EDSDKTransport(Transport):
         return self.worker.call(fn, *args, timeout=timeout)
 
     def connect(self) -> None:
-        self.worker = SdkThread()
+        on_mac_main = sys.platform == "darwin" and threading.current_thread() is threading.main_thread()
+        self.worker = MainThreadRunner() if on_mac_main and self._real_sdk else SdkThread()
         try:
             self._run(self._connect)
         except Exception:
@@ -102,6 +139,11 @@ class EDSDKTransport(Transport):
         self.sdk = self.sdk_factory()
         self.sdk.initialize()
         cams = self.sdk.cameras()
+        for _ in range(30 if sys.platform == "darwin" else 0):  # macOS reports USB cameras a moment later
+            if cams:
+                break
+            spin_run_loop(0.1)
+            cams = self.sdk.cameras()
         if not cams:
             self.sdk.terminate()
             raise RuntimeError("no camera on USB: set the camera's USB connection app to "
