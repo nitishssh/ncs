@@ -82,17 +82,41 @@ class SdkThread:
         self.thread.join(2)
 
 
+_main_dispatch = None  # macOS: callable(fn) that runs fn soon on the main thread (set by the app / hub)
+
+
+def set_main_dispatcher(dispatch) -> None:
+    """Qt app: a queued signal; hub: loop.call_soon_threadsafe. The main loop must also keep the CFRunLoop
+    turning (Qt does; the hub runs a small task for it)."""
+    global _main_dispatch
+    _main_dispatch = dispatch
+
+
 class MainThreadRunner:
-    """macOS: Canon's SDK only finds cameras when called on the main thread, so jobs run inline there (one at a
-    time) and the run loop turns between them. Used by the CLI; same interface as SdkThread."""
+    """macOS: Canon's SDK only finds cameras when called on the main thread. Jobs run inline when the caller is
+    the main thread (CLI) or are handed to it via set_main_dispatcher() (desktop app, hub) - one at a time.
+    Same interface as SdkThread."""
 
     def __init__(self, pump=None):
         self.pump = pump
         self.lock = threading.RLock()
+        self.stopping = False
+        if _main_dispatch:  # nobody else calls in between jobs, so poll for camera events
+            threading.Thread(target=self._pump_loop, daemon=True, name="edsdk-pump").start()
 
-    def call(self, fn, *args, timeout: float = 30):
+    def _pump_loop(self):
+        while not self.stopping:
+            time.sleep(0.2)
+            if self.pump:
+                try:
+                    self.call(lambda: None, timeout=5)
+                except Exception:
+                    pass
+
+    def _job(self, fn, args):
         with self.lock:
-            spin_run_loop(0.02)
+            if threading.current_thread() is threading.main_thread() and not _main_dispatch:
+                spin_run_loop(0.02)  # CLI: nobody else turns the run loop
             if self.pump:
                 try:
                     self.pump()
@@ -100,8 +124,28 @@ class MainThreadRunner:
                     pass
             return fn(*args)
 
+    def call(self, fn, *args, timeout: float = 30):
+        if threading.current_thread() is threading.main_thread():
+            return self._job(fn, args)
+        if not _main_dispatch:
+            raise RuntimeError("macOS: Canon's SDK must be driven from the main thread")
+        box, done = {}, threading.Event()
+
+        def run():
+            try:
+                box["result"] = self._job(fn, args)
+            except BaseException as e:
+                box["error"] = e
+            done.set()
+        _main_dispatch(run)
+        if not done.wait(timeout):
+            raise TimeoutError(f"camera did not answer within {timeout:.0f} s")
+        if "error" in box:
+            raise box["error"]
+        return box.get("result")
+
     def stop(self):
-        pass
+        self.stopping = True
 
 
 class EDSDKTransport(Transport):
@@ -133,8 +177,8 @@ class EDSDKTransport(Transport):
         return self.worker.call(fn, *args, timeout=timeout)
 
     def connect(self) -> None:
-        on_mac_main = sys.platform == "darwin" and threading.current_thread() is threading.main_thread()
-        self.worker = MainThreadRunner() if on_mac_main and self._real_sdk else SdkThread()
+        mac = sys.platform == "darwin" and self._real_sdk
+        self.worker = MainThreadRunner() if mac else SdkThread()
         try:
             self._run(self._connect)
         except Exception:

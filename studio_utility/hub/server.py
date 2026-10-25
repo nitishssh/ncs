@@ -12,6 +12,7 @@ Run:  python -m studio_utility.hub --camera 10.11.0.2:8090      (or --camera moc
 from __future__ import annotations
 
 import asyncio
+import sys
 import json
 import secrets
 import socket
@@ -485,6 +486,15 @@ class Hub:
 
     async def on_startup(self, app):
         self.loop = asyncio.get_running_loop()
+        if sys.platform == "darwin":  # Canon's SDK on macOS runs on the main thread, i.e. this loop
+            from studio_utility.transports.edsdk import set_main_dispatcher, spin_run_loop
+            set_main_dispatcher(self.loop.call_soon_threadsafe)
+
+            async def turn_run_loop():
+                while True:
+                    spin_run_loop(0.005)
+                    await asyncio.sleep(0.03)
+            app["run_loop"] = asyncio.ensure_future(turn_run_loop())
         self.changed = asyncio.Condition()
         threading.Thread(target=self.connect_loop, daemon=True).start()
         self.live_task = asyncio.create_task(self.live_loop())

@@ -42,6 +42,8 @@ function render() {
   $("rec").classList.toggle("hidden", !rec);
   $("recbtn").classList.toggle("on", !!rec);
   for (const id of ["recbtn", "shoot", "af"]) $(id).disabled = !connected;
+  // power zoom only over Wi-Fi; USB has zoom speed but no zoom drive
+  document.querySelector(".zoom").classList.toggle("hidden", connected && !(state.caps || []).includes("zoom_move"));
   renderSettings();
   renderQuick();
 }

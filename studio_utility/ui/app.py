@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QSettings, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (QApplication, QMenu, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QMainWindow, QPushButton, QSlider, QTabWidget,
@@ -176,6 +176,7 @@ class MainWindow(QMainWindow):
 
         # Settings tabs
         self.boxes: dict[str, QComboBox] = {}
+        self.captions: dict[str, QLabel] = {}
         self.tabs = QTabWidget()
         self.tabs.addTab(self.settings_grid(MOVIE), "Movie")
         self.tabs.addTab(self.settings_grid(PHOTO), "Photo")
@@ -287,8 +288,10 @@ class MainWindow(QMainWindow):
             else:
                 box.currentIndexChanged.connect(lambda i, k=key, b=box: self.change_setting(k, b.itemData(i)))
             self.boxes[key] = box
+            self.captions[key] = cap
             grid.addWidget(cap, 0, i)
             grid.addWidget(box, 1, i)
+        grid.setRowStretch(9, 1)  # keep labels on top of their boxes when the tab is taller
         w = QWidget()
         w.setLayout(grid)
         return w
@@ -562,6 +565,10 @@ class MainWindow(QMainWindow):
                 box.setEnabled(False)
                 box.setToolTip("Locked in the camera's current shooting mode (use P, Tv, Av or M)" if error == "locked"
                                else "Not available on this camera or connection")
+        for k in USB:  # each USB library offers a different subset: hide what this one lacks
+            there = settings.get(k, (None,))[0] is not None
+            self.boxes[k].setVisible(there)
+            self.captions[k].setVisible(there)
         usb = any(settings.get(k, (None,))[0] is not None for k in USB) or "focus_drive" in self.caps
         self.tabs.setTabVisible(self.usb_tab, usb)  # Wi-Fi has none of these
         self.loading = False
@@ -794,6 +801,24 @@ class MainWindow(QMainWindow):
         super().closeEvent(e)
 
 
+class _MainCalls(QObject):
+    """Runs callables on the GUI thread (queued signal). Canon's SDK on macOS must be driven from there."""
+    call = Signal(object)
+
+    @Slot(object)
+    def run(self, fn):
+        fn()
+
+
+def _main_thread_calls():
+    if sys.platform != "darwin":
+        return
+    from studio_utility.transports.edsdk import set_main_dispatcher
+    relay = _MainCalls(QApplication.instance())
+    relay.call.connect(relay.run, Qt.QueuedConnection)  # slot owned by the GUI thread
+    set_main_dispatcher(relay.call.emit)
+
+
 def run():
     from studio_utility.diagnostics import configure_logging
     configure_logging()
@@ -801,6 +826,7 @@ def run():
     migrate()  # one-time carry-over of settings from the camctl name
     app = QApplication(sys.argv)
     app.setApplicationName("Studio Utility")
+    _main_thread_calls()
     win = MainWindow()
     win.resize(780, 720)
     win.show()
