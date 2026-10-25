@@ -71,14 +71,30 @@ def from_raw(key: str, raw: str, choices: list[str]) -> str:
     raise ValueError(f"{raw!r} is not an option for {key} (camera offers {choices})")
 
 
+def _canon_camera():
+    """The Canon on USB, never another PTP device (phones show up too)."""
+    import gphoto2 as gp
+    found = [(n, a) for n, a in gp.Camera.autodetect() if "canon" in n.lower()]
+    if not found:
+        raise RuntimeError("no camera on USB (-105): only non-Canon devices found")
+    name, addr = found[0]
+    cam = gp.Camera()
+    abilities = gp.CameraAbilitiesList()
+    abilities.load()
+    cam.set_abilities(abilities[abilities.lookup_model(name)])
+    ports = gp.PortInfoList()
+    ports.load()
+    cam.set_port_info(ports[ports.lookup_path(addr)])
+    return cam
+
+
 class GPhotoTransport(Transport):
     name = "usb-gphoto"
 
     def __init__(self, camera_factory=None):
         """camera_factory() -> object with gphoto2.Camera's methods (tests pass a fake)."""
         if camera_factory is None:
-            import gphoto2 as gp
-            camera_factory = gp.Camera
+            camera_factory = _canon_camera
         self.camera_factory = camera_factory
         self.cam = None
         self.worker: SdkThread | None = None
@@ -299,7 +315,10 @@ class GPhotoTransport(Transport):
                         value = c.get_value()
                     except Exception:
                         value = None
-                    n = c.count_choices() if hasattr(c, "count_choices") else 0
+                    try:  # text/toggle/range widgets have no choices and raise "Bad parameters"
+                        n = c.count_choices()
+                    except Exception:
+                        n = 0
                     try:
                         ro = bool(c.get_readonly())
                     except Exception:
