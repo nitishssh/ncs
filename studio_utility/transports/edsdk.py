@@ -149,6 +149,35 @@ class MainThreadRunner:
         self.stopping = True
 
 
+_shared_thread: SdkThread | None = None  # Windows: one SDK thread per process, so a late job can't overlap the next
+_open_session: dict = {}                 # the session this process has open (sdk, cam), whoever opened it
+
+
+def _sdk_thread() -> SdkThread:
+    global _shared_thread
+    if _shared_thread is None or not _shared_thread.thread.is_alive():
+        _shared_thread = SdkThread()
+    return _shared_thread
+
+
+def _close_leftover():
+    """A connect that outlived its timeout can still open the camera later; close that session before opening
+    a new one, or the camera answers 'communication port in use' until the hub restarts."""
+    old = _open_session.pop("s", None)
+    if not old:
+        return
+    sdk, cam = old
+    for step in (sdk.close, sdk.release):
+        try:
+            step(cam)
+        except Exception:
+            pass
+    try:
+        sdk.terminate()
+    except Exception:
+        pass
+
+
 class EDSDKTransport(Transport):
     name = "usb-edsdk"
 
@@ -187,16 +216,16 @@ class EDSDKTransport(Transport):
 
     def connect(self) -> None:
         mac = sys.platform == "darwin" and self._real_sdk
-        self.worker = MainThreadRunner() if mac else SdkThread()
+        self.worker = MainThreadRunner() if mac else _sdk_thread()
         try:
             self._run(self._connect)
         except Exception:
-            self.worker.stop()
-            self.worker = None
+            self.worker = None  # the shared thread stays: it may still be finishing this connect
             raise
         self.worker.pump = self.sdk.pump
 
     def _connect(self):
+        _close_leftover()
         self.sdk = self.sdk_factory()
         self.sdk.initialize()
         try:
@@ -213,6 +242,7 @@ class EDSDKTransport(Transport):
             for ref, _ in cams[1:]:
                 self.sdk.release(ref)
             self.sdk.open(self.cam)
+            _open_session["s"] = (self.sdk, self.cam)
         except BaseException:
             # the SDK starts once per process: always shut it down, or every retry fails with "internal error"
             self._disconnect()
@@ -231,7 +261,8 @@ class EDSDKTransport(Transport):
         try:
             self._run(self._disconnect, timeout=10)
         finally:
-            self.worker.stop()
+            if isinstance(self.worker, MainThreadRunner):
+                self.worker.stop()
             self.worker = None
 
     def _disconnect(self):
@@ -243,6 +274,8 @@ class EDSDKTransport(Transport):
                 except Exception:
                     pass
             self.items.clear()
+            if _open_session.get("s", (None, None))[1] == self.cam:
+                _open_session.pop("s", None)
             if self.cam:
                 for step in (self.sdk.close, self.sdk.release):
                     try:

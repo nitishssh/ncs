@@ -355,3 +355,21 @@ def test_live_view_rearms_when_camera_still_reports_pc_output(t, fake):
     fake.set_property, fake.download_evf = set_prop, evf
     assert t.liveview_frame().startswith(b"\xff\xd8")
     assert fake.props[P] & codes.EVF_OUTPUT_PC
+
+
+def test_session_left_open_by_a_timed_out_connect_is_closed_first(fake, monkeypatch):
+    """Seen on the Windows hub: a connect gave up after its timeout, finished in the background and kept the
+    camera open; every later connect failed with 'communication port in use' until the hub restarted."""
+    from studio_utility.transports import edsdk as mod
+    t1 = EDSDKTransport(sdk_factory=lambda: fake)
+    t1.connect()
+    t1.worker = None  # abandoned without disconnect, like the timed-out connect
+    closed = []
+    real_close = fake.close
+    fake.close = lambda cam: (closed.append(cam), real_close(cam))
+    fake.running = 0  # the leftover's SDK start is ours to stop; keep the fake's start/stop count simple
+    t2 = EDSDKTransport(sdk_factory=lambda: fake)
+    t2.connect()
+    assert closed == [CAM] and mod._open_session["s"][1] == CAM
+    t2.disconnect()
+    assert "s" not in mod._open_session
