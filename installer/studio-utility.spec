@@ -7,7 +7,7 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 root = SPECPATH + "/.."
 # Transports are imported by name at runtime (studio_utility.transports.load), so list them explicitly
-hidden = collect_submodules("studio_utility.transports") + ["studio_utility.ui.app"]
+hidden = collect_submodules("studio_utility.transports") + ["studio_utility.ui.app", "studio_utility.ui.onboarding"]
 # Large Qt parts Studio Utility doesn't use
 excludes = ["PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick", "PySide6.QtPdf",
             "PySide6.QtPdfWidgets", "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.QtQuick", "PySide6.QtQml",
@@ -15,8 +15,11 @@ excludes = ["PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.Qt
 
 # Native pieces that are found at runtime, not by import analysis: ffmpeg binary, DSP/plugin host, mDNS
 datas, binaries = [], []
-for pkg in ("imageio_ffmpeg", "pedalboard", "noisereduce", "zeroconf", "soundfile", "sounddevice"):
-    d, b, h = collect_all(pkg)
+for pkg in ("imageio_ffmpeg", "pedalboard", "noisereduce", "zeroconf", "soundfile", "sounddevice", "qrcode", "gphoto2"):
+    try:
+        d, b, h = collect_all(pkg)
+    except Exception:  # optional (gphoto2 has no Windows wheels)
+        continue
     datas += d
     binaries += b
     hidden += h

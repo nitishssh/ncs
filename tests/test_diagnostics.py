@@ -7,8 +7,11 @@ def test_connection_checks_are_actionable(monkeypatch):
     assert diagnose_connection("hub", "")[0][0] == "error"
     assert diagnose_connection("hub", "http://studio.local:8765/?token=x")[0][0] == "ok"
     assert diagnose_connection("video", "camera")[0][0] == "error"
-    monkeypatch.delenv("STUDIO_UTILITY_EDSDK", raising=False)
-    assert "STUDIO_UTILITY_EDSDK" in diagnose_connection("usb-edsdk", "")[0][1]
+    from studio_utility import setup_checks
+    monkeypatch.setattr(setup_checks, "edsdk_path", lambda: None)
+    assert "vendor/EDSDK" in diagnose_connection("usb-edsdk", "")[0][1]
+    monkeypatch.setattr(setup_checks, "edsdk_path", lambda: "/sdk/EDSDK")
+    assert diagnose_connection("usb-edsdk", "")[0][0] == "ok"
 
 
 def test_support_report_contains_system_and_recent_log(tmp_path, monkeypatch):

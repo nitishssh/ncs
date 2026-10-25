@@ -27,6 +27,7 @@ from studio_utility.ui.tools import ToolsTab
 from studio_utility.ui.audio_tab import AudioTab
 from studio_utility.ui.workers import CameraExecutor
 from studio_utility.ui.connection import ConnectionDialog
+from studio_utility.ui import onboarding
 
 log = logging.getLogger(__name__)
 
@@ -272,7 +273,9 @@ class MainWindow(QMainWindow):
         last_kind = self.prefs.value("last_kind", "mock")
         self.kind.setCurrentText(last_kind)
         self.arg.setText(self.prefs.value("last_arg", ""))
-        if last_kind != "mock" and self.prefs.value("auto_connect", True, type=bool):
+        if not self.prefs.value("onboarded", False, type=bool):
+            pass  # run() shows onboarding first and connects to what it picks
+        elif last_kind != "mock" and self.prefs.value("auto_connect", True, type=bool):
             QTimer.singleShot(300, lambda: self.connect_to(last_kind, self.arg.text().strip(), quiet=True))
 
     def settings_grid(self, keys: list[str]) -> QWidget:
@@ -347,7 +350,22 @@ class MainWindow(QMainWindow):
 
         return self.io.submit(key, fn, done, report)
 
+    def run_onboarding(self, force: bool = True):
+        choice = onboarding.maybe_show(self, self.prefs, force=force)
+        if choice:
+            kind, value = choice
+            self.kind.setCurrentText(kind)
+            self.arg.setText(value)
+            if not self.t:
+                self.connect_to(kind, value)
+
     def open_connection_setup(self):
+        menu = QMenu(self)
+        menu.addAction("Guided setup…", self.run_onboarding)
+        menu.addAction("Advanced connection settings…", self.open_advanced_setup)
+        menu.exec(self.setup_btn.mapToGlobal(self.setup_btn.rect().bottomLeft()))
+
+    def open_advanced_setup(self):
         dialog = ConnectionDialog(self.kind.currentText(), self.arg.text().strip(), self)
         if dialog.exec():
             kind, value = dialog.selected()
@@ -830,4 +848,5 @@ def run():
     win = MainWindow()
     win.resize(780, 720)
     win.show()
+    QTimer.singleShot(300, lambda: win.run_onboarding(force=False))  # first launch only
     sys.exit(app.exec())

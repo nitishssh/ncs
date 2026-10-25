@@ -309,5 +309,25 @@ async function loadFiles() {
 }
 $("reload").onclick = loadFiles;
 
+// first visit: a short welcome and how to keep Studio Utility on the home screen
+function welcome() {
+  const inApp = /StudioUtilityAndroid/.test(navigator.userAgent);  // the Android app shows its own onboarding
+  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  let seen = false;
+  try { seen = localStorage.getItem("welcomed") === "1"; } catch (e) { /* private mode: show it */ }
+  if (inApp || seen) return;
+  const ios = /iPhone|iPad/.test(navigator.userAgent), android = /Android/.test(navigator.userAgent);
+  $("welcome-install").textContent = standalone ? "" :
+    ios ? "Keep it one tap away: Share → Add to Home Screen." :
+    android ? "Keep it one tap away: install the Studio Utility app, or ⋮ → Add to Home screen." :
+    "Bookmark this page, or open it on your phone.";
+  $("welcome").classList.remove("hidden");
+  $("welcome-go").onclick = () => {
+    try { localStorage.setItem("welcomed", "1"); } catch (e) { /* shown again next time */ }
+    $("welcome").classList.add("hidden");
+  };
+}
+welcome();
+
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 loadState().then(() => { follow(); startLive(); });

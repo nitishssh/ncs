@@ -21,3 +21,8 @@ dist/
 
 # Canon EDSDK: free from Canon, but its licence does not allow publishing it with this repo
 vendor/
+# Android build output and machine-specific SDK path
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

@@ -1,13 +1,10 @@
 """Guided connection setup and local prerequisite checks."""
 from __future__ import annotations
 
-import os
-import shutil
-from pathlib import Path
-
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
                                QLabel, QLineEdit, QPushButton, QVBoxLayout)
 
+from studio_utility import setup_checks
 from studio_utility.diagnostics import write_support_report
 
 KINDS = {
@@ -30,12 +27,12 @@ def diagnose_connection(kind: str, value: str) -> list[tuple[str, str]]:
     elif kind == "wifi":
         checks.append(("ok" if value else "error", "Address entered" if value else "Enter the camera or relay address"))
     elif kind == "usb-edsdk":
-        configured = os.environ.get("STUDIO_UTILITY_EDSDK")
-        found = bool(configured and Path(configured).exists())
-        checks.append(("ok" if found else "error", "Canon EDSDK found" if found else "Set STUDIO_UTILITY_EDSDK to the Canon EDSDK library"))
+        found = setup_checks.edsdk_path() is not None
+        checks.append(("ok" if found else "error", "Canon EDSDK found" if found else
+                       "Put Canon's EDSDK in vendor/EDSDK or set STUDIO_UTILITY_EDSDK"))
     elif kind == "usb-gphoto":
-        found = shutil.which("gphoto2") is not None
-        checks.append(("ok" if found else "error", "gPhoto2 found" if found else "Install gPhoto2 first"))
+        found = setup_checks.gphoto_available()
+        checks.append(("ok" if found else "error", "gPhoto2 found" if found else "Install it: pip install gphoto2"))
     elif kind == "video":
         checks.append(("ok" if value.isdigit() else "error", "Video-device number is valid" if value.isdigit() else "Enter a numeric device number"))
     elif kind == "ble":

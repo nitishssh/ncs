@@ -47,7 +47,17 @@ def feature_checks() -> list[tuple[str, str]]:
         from studio_utility.lut import clog3_to_rec709
         assert clog3_to_rec709(9).shape == (9, 9, 9, 3)
 
-    for name, fn in (("audio", audio), ("voice chain + WAV", wav_and_voice), ("voice sync ffmpeg", ffmpeg),
+    def onboarding():
+        import io
+
+        import qrcode
+
+        from studio_utility import setup_checks
+        from studio_utility.ui import onboarding as _o  # noqa: F401
+        qrcode.make("http://10.11.0.2:8765/?token=x").save(io.BytesIO(), format="PNG")
+        return f"ok (Canon SDK {'found' if setup_checks.edsdk_path() else 'not installed'})"
+
+    for name, fn in (("onboarding + pairing QR", onboarding), ("audio", audio), ("voice chain + WAV", wav_and_voice), ("voice sync ffmpeg", ffmpeg),
                      ("hub client", hub_client), ("Canon Log LUT", lut)):
         check(name, fn)
     return out
