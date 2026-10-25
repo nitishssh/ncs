@@ -164,7 +164,7 @@ class Hub:
             raise web.HTTPServiceUnavailable(text="camera not connected")
         return self.t
 
-    async def cam(self, fn, *args):
+    async def cam(self, fn, *args, counted: bool = True):
         """Run a blocking camera call on the 2-thread pool. A lost session, or three failures in a row, means the
         camera reset its link (mode dial, cable, power): drop it so connect_loop reconnects within seconds."""
         if self.t is None:
@@ -175,8 +175,9 @@ class Hub:
         except (NotSupported, ValueError, web.HTTPException):
             raise
         except Exception as e:
-            self.call_failures = getattr(self, "call_failures", 0) + 1
-            if isinstance(e, CameraLost) or self.call_failures >= 3:
+            if counted:  # live view retries on its own; only a lost session from it means reconnect
+                self.call_failures = getattr(self, "call_failures", 0) + 1
+            if isinstance(e, CameraLost) or (counted and self.call_failures >= 3):
                 self.call_failures = 0
                 if self.t is t:
                     threading.Thread(target=self.drop, args=(f"camera reset the link ({e})",), daemon=True).start()
@@ -254,13 +255,15 @@ class Hub:
             if watching and self.t is not None and "liveview_frame" in self.caps:
                 try:
                     if self.frame is None and hasattr(self.t, "start_liveview"):
-                        await self.cam(self.t.start_liveview)
-                    self.frame = await self.cam(self.t.liveview_frame)
+                        await self.cam(self.t.start_liveview, counted=False)
+                    self.frame = await self.cam(self.t.liveview_frame, counted=False)
                     self.frame_id += 1
+                    self.live_error = None
                     async with self.changed:
                         self.changed.notify_all()
-                except Exception:
+                except Exception as e:
                     self.frame = None
+                    self.live_error = getattr(e, "text", None) or str(e)
                     await asyncio.sleep(1)
                 await asyncio.sleep(1 / LIVE_FPS)
             else:
@@ -457,7 +460,7 @@ class Hub:
                 break
             await asyncio.sleep(0.05)
         if not self.frame:
-            raise web.HTTPServiceUnavailable(text="no live view")
+            raise web.HTTPServiceUnavailable(text="no live view" + (f": {self.live_error}" if getattr(self, "live_error", None) else ""))
         body = self.frame
         if request.query.get("lut") == "clog3":  # preview the graded look; the camera still records log
             body = await self.loop.run_in_executor(None, self.graded, self.frame_id, self.frame)

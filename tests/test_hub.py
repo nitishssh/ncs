@@ -235,3 +235,19 @@ def test_hub_survives_one_odd_failure(hub):
     t.get_setting = flaky
     assert c.get("/api/settings/iso").status_code == 502
     assert c.get("/api/settings/iso").status_code == 200 and h.t is t  # no reconnect for a single hiccup
+
+
+def test_live_view_failures_dont_drop_the_camera(hub):
+    """A camera that won't give live frames in some mode must not be treated as gone (settings still work)."""
+    h, base = hub
+    c = client(h, base, "test")
+    t = h.t
+
+    def no_frames():
+        raise RuntimeError("live view: object not ready")
+    t.liveview_frame = no_frames
+    for _ in range(4):
+        r = c.get("/api/live.jpg")
+        assert r.status_code == 503
+    assert "object not ready" in r.text
+    assert h.t is t and c.get("/api/settings/iso").status_code == 200
