@@ -55,7 +55,8 @@ def find_library() -> Path | None:
     if env:
         return Path(env)
     pattern = "**/EDSDK.dll" if WIN else "**/EDSDK.framework/EDSDK"
-    bases = [ROOT / "vendor" / "EDSDK", Path(sys.executable).parent / "EDSDK", Path.home() / "EDSDK"]
+    bases = [ROOT / "vendor" / "EDSDK", ROOT / "vendor", Path.cwd() / "vendor",  # any layout scp/unzip left
+             Path(sys.executable).parent / "EDSDK", Path.home() / "EDSDK"]
     for base in bases:
         if base.exists():
             hits = sorted(base.glob(pattern), key=lambda p: ("64" not in str(p), len(str(p))))  # prefer 64-bit
