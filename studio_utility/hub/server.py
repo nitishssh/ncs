@@ -76,7 +76,10 @@ def lan_addresses() -> list[str]:
         pass
     def rank(a):  # home network first, then other private nets, Tailscale (100.64/10) last
         return (a.startswith("100."), not a.startswith("192.168."), a)
-    return sorted((a for a in out if not a.startswith(("127.", "169.254."))), key=rank)
+    def virtual(a):  # Windows WSL/Hyper-V adapters (172.16/12): no phone can reach them
+        parts = a.split(".")
+        return parts[0] == "172" and 16 <= int(parts[1]) <= 31
+    return sorted((a for a in out if not a.startswith(("127.", "169.254.")) and not virtual(a)), key=rank)
 
 
 def device_name(user_agent: str) -> str:
