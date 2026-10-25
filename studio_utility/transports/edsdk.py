@@ -199,20 +199,24 @@ class EDSDKTransport(Transport):
     def _connect(self):
         self.sdk = self.sdk_factory()
         self.sdk.initialize()
-        cams = self.sdk.cameras()
-        for _ in range(30 if sys.platform == "darwin" else 0):  # macOS reports USB cameras a moment later
-            if cams:
-                break
-            spin_run_loop(0.1)
+        try:
             cams = self.sdk.cameras()
-        if not cams:
-            self.sdk.terminate()
-            raise RuntimeError("no camera on USB: set the camera's USB connection app to "
-                               "'Photo Import/Remote Control' and close EOS Utility")
-        self.cam = cams[0][0]
-        for ref, _ in cams[1:]:
-            self.sdk.release(ref)
-        self.sdk.open(self.cam)
+            for _ in range(30 if sys.platform == "darwin" else 0):  # macOS reports USB cameras a moment later
+                if cams:
+                    break
+                spin_run_loop(0.1)
+                cams = self.sdk.cameras()
+            if not cams:
+                raise RuntimeError("no camera on USB: set the camera's USB connection app to "
+                                   "'Photo Import/Remote Control' and close EOS Utility")
+            self.cam = cams[0][0]
+            for ref, _ in cams[1:]:
+                self.sdk.release(ref)
+            self.sdk.open(self.cam)
+        except BaseException:
+            # the SDK starts once per process: always shut it down, or every retry fails with "internal error"
+            self._disconnect()
+            raise
         try:  # shots stay on the card (not the PC) so the Files panel and auto-import see them
             self.sdk.set_property(self.cam, codes.PROP["save_to"], codes.SAVE_TO_CAMERA)
         except Exception:
@@ -231,14 +235,23 @@ class EDSDKTransport(Transport):
             self.worker = None
 
     def _disconnect(self):
-        for ref in self.items.values():
-            self.sdk.release(ref)
-        self.items.clear()
-        if self.cam:
-            self.sdk.close(self.cam)
-            self.sdk.release(self.cam)
-            self.cam = None
-        self.sdk.terminate()
+        """Best effort: after the camera reset its link, close/release fail - the SDK must still be shut down."""
+        try:
+            for ref in self.items.values():
+                try:
+                    self.sdk.release(ref)
+                except Exception:
+                    pass
+            self.items.clear()
+            if self.cam:
+                for step in (self.sdk.close, self.sdk.release):
+                    try:
+                        step(self.cam)
+                    except Exception:
+                        pass
+                self.cam = None
+        finally:
+            self.sdk.terminate()
 
     # ---- SDK callbacks (run on the SDK thread during pump)
     def _on_property(self, event, pid, param):

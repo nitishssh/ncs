@@ -40,8 +40,15 @@ class FakeSdk:
     def _t(self):
         self.threads.add(threading.get_ident())
 
-    def initialize(self): self._t()
-    def terminate(self): self._t()
+    def initialize(self):
+        self._t()
+        self.running = getattr(self, "running", 0) + 1
+        if self.running > 1:  # like the real SDK: a second start without a stop fails
+            raise EdsError("initialize", 0x02)
+
+    def terminate(self):
+        self._t()
+        self.running = getattr(self, "running", 1) - 1
     def cameras(self): self._t(); return [(CAM, "Canon EOS R50 V")]
     def open(self, cam): self._t()
     def close(self, cam): self._t()
@@ -285,3 +292,27 @@ def test_lost_session_is_reported_not_retried(t, fake):
     with pytest.raises(CameraLost):
         t.get_setting("iso")
     assert "camera_lost" in t.events(1)
+
+
+def test_failed_connect_and_dead_session_still_stop_the_sdk(fake):
+    """A camera stuck after a mode-dial change: open fails, then later close fails. Each time the SDK must be
+    stopped, or every reconnect after that fails with 'initialize: internal error'."""
+    opens = []
+
+    def stuck_open(cam):
+        opens.append(cam)
+        if len(opens) == 1:
+            raise EdsError("open session", 0x2003)
+    fake.open = stuck_open
+    t = EDSDKTransport(sdk_factory=lambda: fake)
+    with pytest.raises(Exception):
+        t.connect()
+    assert fake.running == 0
+    t.connect()  # the retry works
+
+    def dead(cam):
+        raise EdsError("close", 0xC1)
+    fake.close = dead
+    t.disconnect()
+    assert fake.running == 0
+    EDSDKTransport(sdk_factory=lambda: fake).connect()
