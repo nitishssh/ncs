@@ -287,7 +287,12 @@ class EDSDKTransport(Transport):
             options = self.sdk.property_options(self.cam, pid)
         except Exception:
             options = []
-        return {"value": codes.to_value(key, code), "ability": [codes.to_value(key, c) for c in options]}
+        ability = [codes.to_value(key, c) for c in options]
+        if key in codes.TABLES:
+            # a setting the current mode controls (shutter/iris in P) comes back as one placeholder code the SDK
+            # never documents (0x1500, 0xF30): drop unknown codes so it shows as locked, not as a bogus option
+            ability = [a for a in ability if not a.startswith("0x")]
+        return {"value": codes.to_value(key, code), "ability": ability}
 
     def get_setting(self, key: str) -> dict:
         if key not in SETTINGS:

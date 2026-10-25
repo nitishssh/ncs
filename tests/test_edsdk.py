@@ -258,3 +258,11 @@ def test_focus_drive_steps(t, fake):
     assert "focus_drive" in t.capabilities()
     with pytest.raises(ValueError):
         t.focus_drive(0)
+
+
+def test_mode_locked_settings_show_no_bogus_options(t, fake):
+    """In P mode the R50 V answers shutter/iris options with one undocumented placeholder (seen: 0x1500, 0xF30)."""
+    fake.options[codes.PROP["tv"]] = [0x1500]
+    fake.options[codes.PROP["av"]] = [0xF30]
+    assert t.get_setting("tv") == {"value": "1/125", "ability": []}
+    assert t.get_setting("av")["ability"] == []
