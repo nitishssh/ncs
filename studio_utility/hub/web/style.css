@@ -144,8 +144,9 @@ main { flex: 1; position: relative; overflow: hidden; min-height: 0; }
 
 /* ---------- toast */
 .toast { position: fixed; left: 50%; top: calc(46px + env(safe-area-inset-top)); z-index: 30; max-width: calc(100% - 28px); padding: 10px 14px; border-radius: 12px;
-  background: rgba(40,40,44,.96); font-size: 14px; box-shadow: 0 8px 28px rgba(0,0,0,.5); transform: translate(-50%, -150%); transition: transform .4s var(--spring); }
-.toast.show { transform: translate(-50%, 0); }
+  background: rgba(40,40,44,.96); font-size: 14px; box-shadow: 0 8px 28px rgba(0,0,0,.5); transform: translate(-50%, -150%); transition: transform .4s var(--spring), visibility 0s .4s; visibility: hidden; }
+/* -150% of its own height doesn't clear the 46px strip, so hide it once it has slid up */
+.toast.show { transform: translate(-50%, 0); visibility: visible; transition: transform .4s var(--spring); }
 
 /* ---------- first-visit welcome */
 .welcome { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; background: rgba(0,0,0,.6); }
