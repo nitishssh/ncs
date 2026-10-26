@@ -7,6 +7,7 @@ import threading
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
+import shiboken6
 from PySide6.QtWidgets import (QButtonGroup, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton,
                                QStackedWidget, QVBoxLayout, QWidget)
 
@@ -163,7 +164,12 @@ class Onboarding(QDialog):
     def start_detect(self):
         self.choose_sub.setText("Looking for your camera…")
         self.checks.setText("Checking…")
-        threading.Thread(target=lambda: self.detected.emit(self._detect()), daemon=True).start()
+        threading.Thread(target=self._run_detect, daemon=True).start()
+
+    def _run_detect(self):
+        found = self._detect()
+        if shiboken6.isValid(self):  # the dialog may be gone if detection outlived it
+            self.detected.emit(found)
 
     def show_found(self, found: setup_checks.Found):
         self.found = found
@@ -245,6 +251,11 @@ def maybe_show(parent, prefs, force: bool = False) -> tuple[str, str] | None:
     if not force and prefs.value("onboarded", False, type=bool):
         return None
     dlg = Onboarding(parent)
-    accepted = dlg.exec()
-    prefs.setValue("onboarded", True)
-    return dlg.selected() if accepted else None
+    try:
+        accepted = dlg.exec()
+        prefs.setValue("onboarded", True)
+        return dlg.selected() if accepted else None
+    finally:
+        # delete it now: a parentless dialog left to PySide's cleanup at exit crashed the app on quit (SIGSEGV
+        # in ~QPushButton after the QApplication was gone)
+        shiboken6.delete(dlg)
