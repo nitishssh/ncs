@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.util.Log;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
@@ -49,8 +50,10 @@ final class Updates {
                 }
                 String current = a.getPackageManager().getPackageInfo(a.getPackageName(), 0).versionName;
                 SharedPreferences prefs = a.getSharedPreferences(SetupActivity.PREFS, Activity.MODE_PRIVATE);
-                if (apk == null || sums == null || !newer(version, current) || version.equals(prefs.getString(SKIP, null)))
+                if (apk == null || sums == null || !newer(version, current) || version.equals(prefs.getString(SKIP, null))) {
+                    Log.i("Updates", "no update: latest " + version + ", have " + current);
                     return;
+                }
                 final String url = apk, name = apkName, sumsUrl = sums;
                 a.runOnUiThread(() -> {
                     if (a.isFinishing()) return;
@@ -61,8 +64,8 @@ final class Updates {
                             .setNeutralButton("Skip this version", (d, w) -> prefs.edit().putString(SKIP, version).apply())
                             .show();
                 });
-            } catch (Exception ignored) {
-                // offline, GitHub rate limit, no release yet: try again next start
+            } catch (Exception e) {
+                Log.i("Updates", "check failed (offline? rate limit?): " + e);  // try again next start
             }
         }, "update-check").start();
     }
@@ -103,18 +106,29 @@ final class Updates {
                     if (p.length == 2 && p[1].replaceFirst("^\\*", "").equals(name)) want = p[0].toLowerCase();
                 }
                 if (want == null) throw new Exception(name + " isn't in SHA256SUMS.txt");
-                byte[] data = get(url);
-                if (!hex(MessageDigest.getInstance("SHA-256").digest(data)).equals(want))
-                    throw new Exception("the download doesn't match its published checksum");
                 File dir = new File(a.getCacheDir(), "updates");
                 dir.mkdirs();
                 File out = new File(dir, "update.apk");
-                try (FileOutputStream f = new FileOutputStream(out)) { f.write(data); }
+                String got = null;
+                for (int attempt = 1; attempt <= 3 && got == null; attempt++) {  // phones drop connections mid-file
+                    try {
+                        got = save(url, out);
+                    } catch (java.io.IOException e) {
+                        Log.i("Updates", "download attempt " + attempt + " failed: " + e);
+                        if (attempt == 3) throw e;
+                        Thread.sleep(2000L * attempt);
+                    }
+                }
+                if (!got.equals(want)) {
+                    out.delete();
+                    throw new Exception("the download doesn't match its published checksum");
+                }
                 Uri uri = FileProvider.getUriForFile(a, a.getPackageName() + ".updates", out);
                 Intent install = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
                 a.runOnUiThread(() -> a.startActivity(install));
             } catch (Exception e) {
+                Log.w("Updates", "download failed", e);
                 a.runOnUiThread(() -> Toast.makeText(a, "Update failed: " + e.getMessage(), Toast.LENGTH_LONG).show());
             }
         }, "update-download").start();
@@ -132,6 +146,24 @@ final class Updates {
         } finally {
             c.disconnect();
         }
+    }
+
+    /** Streams url into out and returns its SHA-256 (an APK doesn't need to sit in memory). */
+    private static String save(String url, File out) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(10000);
+        c.setReadTimeout(60000);
+        MessageDigest sha = MessageDigest.getInstance("SHA-256");
+        try (InputStream in = c.getInputStream(); FileOutputStream f = new FileOutputStream(out)) {
+            byte[] b = new byte[1 << 16];
+            for (int n; (n = in.read(b)) > 0; ) {
+                f.write(b, 0, n);
+                sha.update(b, 0, n);
+            }
+        } finally {
+            c.disconnect();
+        }
+        return hex(sha.digest());
     }
 
     private static String hex(byte[] b) {

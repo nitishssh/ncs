@@ -57,7 +57,11 @@ public class SetupActivity extends AppCompatActivity {
             return;
         }
         showWelcome();
-        Updates.check(this);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (!isFinishing()) Updates.check(this);  // onResume: also after the user comes back from allowing installs
     }
 
     @Override protected void onDestroy() {
