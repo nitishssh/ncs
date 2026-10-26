@@ -47,12 +47,13 @@ Your phone and Mac need no changes.
 ## What's built (and what isn't verified yet)
 | | Built | Verified with the real SDK |
 |---|---|---|
-| Connect, model, firmware, battery, shots left | ✅ | ⏳ |
-| ISO, shutter, aperture, exposure comp., WB, picture style, shooting mode | ✅ | ⏳ |
-| Shoot, AF (half-press), movie record start/stop | ✅ | ⏳ |
-| Live view over USB | ✅ | ⏳ |
-| Card file list, download with progress/cancel, thumbnails | ✅ | ⏳ |
+| Connect, model, firmware, battery, shots left | ✅ | ✅ Mac, 2026-10-26 |
+| ISO, shutter, aperture, exposure comp., WB, picture style, shooting mode | ✅ | ✅ Mac, 2026-10-26 |
+| Shoot, AF (half-press), movie record start/stop | ✅ | ✅ Mac, 2026-10-26 |
+| Live view over USB | ✅ | ✅ Mac, 2026-10-26 |
+| Card file list, download with progress/cancel, thumbnails | ✅ | ✅ Mac, 2026-10-26 |
 | Camera change events → all devices update | ✅ | ⏳ |
 | Property discovery (`edsdk-discover`, `/api/discover`) | ✅ | ⏳ |
+| Live view in S&F (slow/fast motion) mode | — | ❌ camera sends no frames (0xA104); use C1/movie modes |
 | Canon Log 3 / movie format / movie size over USB | ❓ depends on step 4 | ⏳ |
 | Power zoom, tap-to-focus over USB | ❌ Wi-Fi only for now | — |

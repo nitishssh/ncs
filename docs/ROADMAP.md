@@ -44,7 +44,7 @@ first, then verified on the real R50 V through the Windows relay.
 | # | Item | Done when |
 |---|---|---|
 | 5.1 | USB webcam (UVC) with the R50 V | Live view in Studio Utility and OBS, delay measured |
-| 5.2 | ⏳ USB tethering (EDSDK): built, hub uses it; live view being stabilised | Shoot + download over USB on Windows (EDSDK download needed) |
+| 5.2 | ✅ USB tethering (EDSDK): shoot, record, download, live view, settings verified on the Mac (2026-10-26); Windows hub doesn't see the camera yet | Shoot + download over USB on Windows (EDSDK download needed) |
 | 5.3 | Bluetooth remote | Shutter/record over BLE; UUIDs verified with `studio-utility ble-scan --services` |
 
 ## Later, if needed
