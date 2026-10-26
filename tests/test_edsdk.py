@@ -161,11 +161,11 @@ def test_shoot_focus_and_record(t, fake):
     assert fake.props[codes.PROP["record"]] == codes.RECORD_STOP
 
 
-def test_record_in_a_stills_mode_says_to_switch_to_movie(t, fake):
+def test_record_when_busy_names_every_likely_cause(t, fake):
     def busy(ref, pid, value, param=0):
         raise EdsError("set property 0x510", codes.ERR_DEVICE_BUSY)
     fake.set_property = busy
-    with pytest.raises(RuntimeError, match="movie mode"):
+    with pytest.raises(RuntimeError, match="already recording.*menu.*movie mode"):
         t.record(True)
 
 
@@ -407,3 +407,17 @@ def test_session_left_open_by_a_timed_out_connect_is_closed_first(fake, monkeypa
     assert closed == [CAM] and mod._open_session["s"][1] == CAM
     t2.disconnect()
     assert "s" not in mod._open_session
+
+
+def test_mac_keeps_one_sdk_alive_so_reconnect_finds_the_camera(monkeypatch):
+    """macOS: terminate + initialize in one process loses a camera that stayed plugged in, so the SDK starts once
+    and disconnect only closes the session; connect -> disconnect -> connect must not restart it."""
+    from studio_utility.transports import edsdk as mod
+    monkeypatch.setattr(mod, "_resident", {})
+    fake = FakeSdk()
+    for _ in range(3):
+        tr = EDSDKTransport(sdk_factory=lambda: fake)
+        tr.keep_sdk_alive = True
+        tr.connect()
+        tr.disconnect()
+    assert fake.running == 1  # initialized once, never terminated (a second initialize would have raised)

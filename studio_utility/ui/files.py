@@ -330,8 +330,8 @@ class FilesPanel(QWidget):
             if not results:
                 self.synced.emit("Voice sync: no new clip has a matching mic recording")
                 return
-            parts = [f"{r.output.name} (offset {r.offset.seconds:+.2f}s)" if r.output else f"{r.clip.name}: {r.error}"
-                     for r in results]
+            parts = [(f"{r.output.name} (offset {r.offset.seconds:+.2f}s)" + (f" ⚠ {r.warning}" if r.warning else ""))
+                     if r.output else f"{r.clip.name}: {r.error}" for r in results]
             self.synced.emit("Voice synced: " + "; ".join(parts))
         threading.Thread(target=work, daemon=True).start()
 
@@ -344,10 +344,22 @@ class FilesPanel(QWidget):
         self.journal.update(remote, Path(local).parent, "completed")
         if local.lower().endswith(sync.VIDEO_EXT):
             self._got_movie = True
+            self.check_clip_sound(Path(local))
         it = self.items.get(remote)
         if it:
             it.setText("✓ " + remote.rsplit("/", 1)[-1])
         self.message.emit(f"Saved {local}")
+
+    def check_clip_sound(self, clip: Path):
+        """Warn right after download when the camera recorded no (or almost no) sound."""
+        def work():
+            try:
+                problem = sync.clip_sound_problem(clip)
+            except Exception:
+                return  # an unreadable clip is reported elsewhere; never block the import on this check
+            if problem:
+                self.message.emit(f"⚠ {clip.name}: {problem}")
+        threading.Thread(target=work, daemon=True).start()
 
     def on_failed(self, remote: str, msg: str):
         current = dict(self.journal.pending()).get(remote, self.dest())

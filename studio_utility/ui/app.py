@@ -9,11 +9,12 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSettings, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (QApplication, QMenu, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-                               QListWidget, QMainWindow, QPushButton, QSlider, QTabWidget,
+                               QListWidget, QMainWindow, QPushButton, QScrollArea, QSlider, QTabWidget,
                                QVBoxLayout, QWidget)
 
 import cv2
 import numpy as np
+import shiboken6
 
 from studio_utility import transports
 from studio_utility.lut import BUILTIN as BUILTIN_LUTS, apply_lut, clog3_to_rec709, load_cube, write_cube
@@ -36,6 +37,7 @@ MOVIE = ["movie_mode", "movie_size", "movie_format", "movie_af"]
 COLOR = ["canon_log", "picture_style", "log_assist", "hdr_pq"]
 USB = ["zoom_speed", "color_temp", "wb_shift_ab", "wb_shift_gm", "color_filter", "movie_servo_af",
        "clip_prefix", "clip_name"]  # only over USB (Canon EDSDK / gphoto2)
+CAMERA_AUDIO = ["sound_recording", "sound_level", "wind_filter", "attenuator"]  # shown in the Audio tab
 TEXT = {"clip_prefix", "clip_name"}
 LABELS = {"exposure": "Exp. comp", "af_method": "AF method", "mode": "Mode", "tv": "Shutter", "av": "Aperture", "iso": "ISO", "wb": "WB",
           "movie_mode": "Movie mode", "movie_size": "Size / fps", "movie_format": "Format",
@@ -43,7 +45,9 @@ LABELS = {"exposure": "Exp. comp", "af_method": "AF method", "mode": "Mode", "tv
           "log_assist": "View Assist", "hdr_pq": "HDR PQ",
           "zoom_speed": "Zoom speed", "color_temp": "Color temp", "wb_shift_ab": "WB shift B/A",
           "wb_shift_gm": "WB shift M/G", "color_filter": "Color filter", "movie_servo_af": "Servo AF",
-          "clip_prefix": "Clip prefix", "clip_name": "Clip name"}
+          "clip_prefix": "Clip prefix", "clip_name": "Clip name",
+          "sound_recording": "Sound rec.", "sound_level": "Rec. level", "wind_filter": "Wind filter",
+          "attenuator": "Attenuator"}
 DEFAULT_ARG = {"hub": "", "mock": "", "wifi": "10.11.0.2:8090", "ble": "", "usb-edsdk": "", "usb-gphoto": "", "video": "0"}
 
 STYLE = """
@@ -215,9 +219,13 @@ class MainWindow(QMainWindow):
         self.tools.message.connect(self.flash)
         self.tabs.addTab(self.tools, "Tools")
         # External mics (DJI Mic, Kreo Sonik…) record WAVs into the same dated folder as imports
-        self.audio = AudioTab(lambda: self.files.dest())
+        self.audio = AudioTab(lambda: self.files.dest(), camera_settings=self.settings_grid(CAMERA_AUDIO))
         self.audio.message.connect(self.flash)
-        self.tabs.addTab(self.audio, "Audio")
+        audio_scroll = QScrollArea()  # mics + voice chain + EQ are taller than a laptop screen leaves for a tab
+        audio_scroll.setWidget(self.audio)
+        audio_scroll.setWidgetResizable(True)
+        audio_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.tabs.addTab(audio_scroll, "Audio")
 
         # Controls
         self.shutter = QPushButton("Shoot")
@@ -476,8 +484,9 @@ class MainWindow(QMainWindow):
         self.set_connected(False)
         self.conn_btn.setText("Stop")
         if quiet or self._attempts:
-            self.flash(f"Waiting for camera… (attempt {self._attempts}; {error})")
-            self.retry.start(5000)
+            delay = retry_delay(self._attempts)
+            self.flash(f"Waiting for camera… (attempt {self._attempts}, next in {delay // 1000} s; {error})")
+            self.retry.start(delay)
         else:
             self._want = None
             self.conn_btn.setText("Connect")
@@ -583,12 +592,13 @@ class MainWindow(QMainWindow):
                 box.setEnabled(False)
                 box.setToolTip("Locked in the camera's current shooting mode (use P, Tv, Av or M)" if error == "locked"
                                else "Not available on this camera or connection")
-        for k in USB:  # each USB library offers a different subset: hide what this one lacks
+        for k in USB + CAMERA_AUDIO:  # each link offers a different subset: hide what this one lacks
             there = settings.get(k, (None,))[0] is not None
             self.boxes[k].setVisible(there)
             self.captions[k].setVisible(there)
         usb = any(settings.get(k, (None,))[0] is not None for k in USB) or "focus_drive" in self.caps
         self.tabs.setTabVisible(self.usb_tab, usb)  # Wi-Fi has none of these
+        self.audio.show_camera_settings(any(settings.get(k, (None,))[0] is not None for k in CAMERA_AUDIO))
         self.loading = False
 
     def refresh_status(self):
@@ -740,7 +750,10 @@ class MainWindow(QMainWindow):
             else:
                 self.flash(f"Record command failed: {error}")
 
-        self.run_camera("record", lambda: transport.record(target), confirmed, rejected)
+        if not self.run_camera("record", lambda: transport.record(target), confirmed, rejected):
+            # the previous Rec command hasn't come back from the camera yet: never leave the button dead
+            self.rec.setEnabled(True)
+            self.flash("The camera is still answering the last Rec command - try again in a moment")
 
     def update_rec(self):
         self.rec.setText("■ Stop" if self.recording else "● Rec")
@@ -819,6 +832,12 @@ class MainWindow(QMainWindow):
         super().closeEvent(e)
 
 
+def retry_delay(attempts: int) -> int:
+    """ms until the next reconnect: 5, 10, 20, 40, then every 60 s. Each USB attempt goes through macOS Image
+    Capture; retrying a stuck one every 5 s ended in a crash inside ImageCaptureCore (2026-10-27)."""
+    return min(5000 * 2 ** max(attempts - 1, 0), 60000)
+
+
 class _MainCalls(QObject):
     """Runs callables on the GUI thread (queued signal). Canon's SDK on macOS must be driven from there."""
     call = Signal(object)
@@ -849,4 +868,12 @@ def run():
     win.resize(780, 720)
     win.show()
     QTimer.singleShot(300, lambda: win.run_onboarding(force=False))  # first launch only
-    sys.exit(app.exec())
+    sys.exit(finish(app, win, app.exec()))
+
+
+def finish(app, win, code: int) -> int:
+    """Destroy the window (and every child) while the QApplication still exists. Left to PySide's exit cleanup it
+    was torn down after the app and crashed the process on quit (SIGSEGV in ~QPushButton, 2026-10-27)."""
+    shiboken6.delete(win)
+    app.processEvents()
+    return code

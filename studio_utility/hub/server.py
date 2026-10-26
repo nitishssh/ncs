@@ -36,6 +36,7 @@ SNAPSHOT = ("movie_size", "iso", "tv", "av", "exposure", "wb", "af_method", "pic
 WEB = Path(__file__).parent / "web"
 CONFIG = CONFIG_DIR / "hub.json"
 CACHE = CONFIG_DIR / "hub-cache"
+PHONE_AUDIO = CONFIG_DIR / "phone-audio"  # mic recordings uploaded by phones, named by start time for sync
 LOG_MAX = 500
 LIVE_FPS = 15
 ACCESS_ROLE = web.RequestKey("access_role", str)
@@ -460,6 +461,49 @@ class Hub:
             return web.json_response(fresh)
         return web.json_response(await self.cam(self.cam_t.get_setting, key))
 
+    async def api_audio_upload(self, request):
+        """A phone's mic recording, streamed in (any size). Saved as <start>_Phone_<device>.wav so sync.pair_clips
+        lines it up with the clip recorded at the same time; non-WAV uploads (browser webm/mp4) are converted."""
+        started = float(request.headers.get("X-Audio-Started") or time.time() * 1000) / 1000
+        device = "".join(c for c in request.get(DEVICE_NAME, "Phone") if c.isalnum()) or "Phone"
+        kind = request.content_type or ""
+        ext = ".wav" if "wav" in kind else ".mp4" if "mp4" in kind or "aac" in kind else ".webm"
+        PHONE_AUDIO.mkdir(parents=True, exist_ok=True)
+        stem = f"{time.strftime('%Y-%m-%d_%H%M%S', time.localtime(started))}_Phone_{device}"
+        raw = PHONE_AUDIO / (stem + (ext if ext != ".wav" else ".part"))
+        size = 0
+        with raw.open("wb") as f:
+            async for chunk in request.content.iter_chunked(1 << 16):
+                f.write(chunk)
+                size += len(chunk)
+        if not size:
+            raw.unlink()
+            raise web.HTTPBadRequest(text="empty recording")
+        wav = PHONE_AUDIO / (stem + ".wav")
+        if ext == ".wav":
+            raw.replace(wav)
+        else:
+            from studio_utility.sync import ffmpeg_exe
+            cmd = [ffmpeg_exe(), "-v", "error", "-y", "-i", str(raw), "-ar", "48000", "-c:a", "pcm_s24le", str(wav)]
+            proc = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE)
+            _, err = await proc.communicate()
+            if proc.returncode:
+                raise web.HTTPBadGateway(text=f"couldn't convert the recording: {err.decode(errors='replace')[-300:]}")
+            raw.unlink()
+        self.publish({"type": "audio", "by": request.get(DEVICE_NAME, "device"), "name": wav.name})
+        return web.json_response({"ok": True, "name": wav.name, "bytes": wav.stat().st_size})
+
+    async def api_audio_list(self, request):
+        files = sorted(PHONE_AUDIO.glob("*.wav")) if PHONE_AUDIO.exists() else []
+        return web.json_response([{"name": p.name, "bytes": p.stat().st_size} for p in files])
+
+    async def api_audio_file(self, request):
+        name = request.query.get("name", "")
+        path = PHONE_AUDIO / name
+        if "/" in name or "\\" in name or name.startswith(".") or not path.is_file():
+            raise web.HTTPNotFound(text="no such recording")
+        return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     async def api_files(self, request):
         return web.json_response(await self.cam(self.cam_t.list_files))
 
@@ -559,6 +603,9 @@ class Hub:
         r.add_get("/api/live.mjpg", self.api_live_mjpg)
         r.add_get("/api/live/info", self.api_live_info)
         r.add_get("/api/discover", self.api_discover)
+        r.add_post("/api/audio", self.api_audio_upload)
+        r.add_get("/api/audio", self.api_audio_list)
+        r.add_get("/api/audio/file", self.api_audio_file)
         def serve(name):
             async def handler(request):
                 return web.FileResponse(WEB / name)

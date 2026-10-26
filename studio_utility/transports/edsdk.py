@@ -160,6 +160,12 @@ def _sdk_thread() -> SdkThread:
     return _shared_thread
 
 
+# macOS: once EdsTerminateSDK has run in a process, a fresh EdsInitializeSDK only sees cameras plugged in AFTER it -
+# reconnecting to a camera that stayed on the cable found nothing until a replug or an app restart (2026-10-27).
+# So on macOS the SDK starts once per process and stays up; disconnect only closes the camera session.
+_resident: dict = {}
+
+
 def _close_leftover():
     """A connect that outlived its timeout can still open the camera later; close that session before opening
     a new one, or the camera answers 'communication port in use' until the hub restarts."""
@@ -172,6 +178,8 @@ def _close_leftover():
             step(cam)
         except Exception:
             pass
+    if _resident.get("sdk") is sdk:
+        return  # the process-wide SDK stays up
     try:
         sdk.terminate()
     except Exception:
@@ -186,6 +194,7 @@ class EDSDKTransport(Transport):
     def __init__(self, sdk_factory=None, lib_path: str | None = None):
         """sdk_factory() -> object with edsdk_native.Sdk's methods (tests pass a fake)."""
         self._real_sdk = sdk_factory is None
+        self.keep_sdk_alive = sys.platform == "darwin" and self._real_sdk  # see _resident
         if sdk_factory is None:
             from studio_utility.edsdk_native import Sdk
             sdk_factory = lambda: Sdk(lib_path)  # noqa: E731
@@ -229,8 +238,13 @@ class EDSDKTransport(Transport):
 
     def _connect(self):
         _close_leftover()
-        self.sdk = self.sdk_factory()
-        self.sdk.initialize()
+        if self.keep_sdk_alive and "sdk" in _resident:
+            self.sdk = _resident["sdk"]
+        else:
+            self.sdk = self.sdk_factory()
+            self.sdk.initialize()
+            if self.keep_sdk_alive:
+                _resident["sdk"] = self.sdk
         try:
             cams = self.sdk.cameras()
             for _ in range(30 if sys.platform == "darwin" else 0):  # macOS reports USB cameras a moment later
@@ -287,7 +301,8 @@ class EDSDKTransport(Transport):
                         pass
                 self.cam = None
         finally:
-            self.sdk.terminate()
+            if not (self.keep_sdk_alive and _resident.get("sdk") is self.sdk):
+                self.sdk.terminate()
 
     # ---- SDK callbacks (run on the SDK thread during pump)
     def _on_property(self, event, pid, param):
@@ -410,9 +425,11 @@ class EDSDKTransport(Transport):
             self._run(self.sdk.set_property, self.cam, codes.PROP["record"],
                       codes.RECORD_START if start else codes.RECORD_STOP)
         except EdsError as e:
-            # the R50 V answers "device busy" when the mode dial is on a stills mode (found with A+)
+            # the R50 V answers "device busy" for several states: a stills mode (found with A+), already recording
+            # from its own button, a menu or playback open (seen 2026-10-26 with the switch on movie) - name them all
             if start and e.code == codes.ERR_DEVICE_BUSY:
-                raise RuntimeError("the camera can't record in this mode: turn the mode dial to a movie mode") from e
+                raise RuntimeError("the camera is busy and won't start recording: check it isn't already recording "
+                                   "from its own button, close any menu or playback, and use a movie mode") from e
             raise
         self._rec_since = time.time() if start else None
 
