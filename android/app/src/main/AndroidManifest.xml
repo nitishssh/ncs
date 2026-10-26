@@ -7,6 +7,8 @@
     <!-- Bonjour/NSD discovery of the Studio Hub on the local network -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- installing updates downloaded from GitHub releases (Updates.java); the user confirms each one -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
@@ -28,5 +30,11 @@
         <!-- portrait-friendly scanner from zxing-android-embedded -->
         <activity android:name="com.journeyapps.barcodescanner.CaptureActivity"
             android:screenOrientation="fullSensor" tools:replace="screenOrientation" />
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
     </application>
 </manifest>
