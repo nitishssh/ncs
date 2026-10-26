@@ -225,7 +225,8 @@ class Sdk:
     def item_info(self, item) -> dict:
         info = DirectoryItemInfo()
         self._ok(self.lib.EdsGetDirectoryItemInfo(item, byref(info)), "item info")
-        return {"name": info.szFileName.decode(errors="replace"), "size": info.size, "folder": bool(info.isFolder)}
+        return {"name": info.szFileName.decode(errors="replace"), "size": info.size, "folder": bool(info.isFolder),
+                "time": float(info.dateTime)}  # capture time, seconds since 1970 (0 when the camera doesn't say)
 
     def download(self, item, path: Path, size: int, progress=None, cancel=None, chunk: int = 1 << 20) -> bool:
         """Chunked so the UI gets progress and can cancel. Returns False if cancelled."""

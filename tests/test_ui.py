@@ -215,3 +215,39 @@ def test_rec_button_never_stays_disabled_when_a_command_is_pending(win, app, mon
 def test_reconnect_backs_off_instead_of_hammering_the_camera():
     from studio_utility.ui.app import retry_delay
     assert [retry_delay(n) for n in range(0, 8)] == [5000, 5000, 10000, 20000, 40000, 60000, 60000, 60000]
+
+
+def test_card_list_is_newest_first_across_photos_and_movies():
+    """Seen on the R50 V: every photo was listed before a clip shot a minute earlier."""
+    from studio_utility.ui.files import newest_first
+    paths = ["edsdk:/DCIM/100CANON/IMG_0145.JPG", "edsdk:/DCIM/100CANON/IMG_0146.JPG",
+             "edsdk:/XFVC/A_0001C049A261027_013258E6_CANON.MP4", "edsdk:/XFVC/A_0001C051A261027_0159138U_CANON.MP4"]
+    by_name_only = newest_first(paths)
+    assert by_name_only[0].endswith("C051A261027_0159138U_CANON.MP4")  # movie names carry the time
+    times = {paths[0]: 1000.0, paths[1]: 9e9, paths[2]: 2000.0, paths[3]: 3000.0}
+    assert newest_first(paths, times)[0].endswith("IMG_0146.JPG")    # transport times win
+
+
+def test_files_panel_fetches_only_the_first_thumbnails(app, monkeypatch):
+    """259 thumbnails fetched back to back froze the window over USB: fetch the newest few, the rest on scroll."""
+    from studio_utility.ui import files
+    asked = []
+
+    class Loader:
+        def __init__(self, t, paths, busy=None):
+            asked.extend(paths)
+            self.paths = list(paths)
+            self.loaded = type("S", (), {"connect": lambda *_: None})()
+
+        def start(self):
+            pass
+
+        def isRunning(self):
+            return True
+
+    monkeypatch.setattr(files, "ThumbLoader", Loader)
+    panel = files.FilesPanel()
+    panel.t = type("T", (), {"list_files": lambda self: [f"edsdk:/DCIM/IMG_{n:04}.JPG" for n in range(259)]})()
+    panel.caps = {"thumbnail"}
+    panel.refresh()
+    assert len(asked) == files.FIRST_THUMBS and asked[0].endswith("IMG_0258.JPG")

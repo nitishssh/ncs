@@ -32,7 +32,8 @@ RECENT_S = 8  # rolling window kept for live suggestions
 SOURCES = ("camera", "computer", "external", "virtual")
 SOURCE_LABELS = {"camera": "Camera", "computer": "This computer", "external": "External mic",
                  "virtual": "Virtual", "phone": "Phone"}
-_CAMERA = ("eos", "canon", "cam link", "hdmi", "capture", "usb video", "uvc", "elgato", "game capture")
+_CAMERA = ("eos", "canon", "cam link", "hdmi", "capture", "usb video", "uvc", "elgato", "game capture",
+           "camera", "webcam", "owl")  # a webcam's built-in mic (Owl 4K PRO Camera) is camera audio, not an external mic
 _COMPUTER = ("macbook", "imac", "mac mini", "mac studio", "built-in", "internal", "microphone array",
              "realtek", "intel smart sound", "conexant", "iphone microphone")
 _VIRTUAL = ("blackhole", "loopback", "vb-audio", "cable output", "soundflower", "stereo mix", "zoomaudio",

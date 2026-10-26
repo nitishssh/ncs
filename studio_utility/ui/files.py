@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import re
 import time
 from datetime import date
 from pathlib import Path
@@ -16,7 +17,29 @@ from studio_utility.core import Cancelled
 from studio_utility.imports import ImportJournal
 
 THUMB = QSize(160, 106)
+FIRST_THUMBS = 30  # thumbnails fetched up front (the newest); the rest as they scroll into view
+THUMB_GAP_S = 0.03  # pause between fetches: over USB on macOS each one runs on the UI thread
 DEFAULT_ROOT = Path.home() / "Pictures" / "R50V"
+
+
+_CANON_TIME = re.compile(r"C\d{3}[A-Z](\d{6})_(\d{6})")  # A_0001C051A261027_0159138U_CANON.MP4 -> 261027 015913
+
+
+def newest_first(paths: list[str], times: dict[str, float] | None = None) -> list[str]:
+    """Card files, newest first. Transports list folder by folder (all photos, then all movies), so their order
+    put a clip taken a minute ago below every photo. Sort by the capture time the transport reports, else the time
+    in Canon's movie names, else the file number (IMG_0146 after IMG_0145)."""
+    times = times or {}
+
+    def key(p: str):
+        name = p.rsplit("/", 1)[-1]
+        if p in times:
+            return (times[p], name)
+        m = _CANON_TIME.search(name)
+        if m:
+            return (time.mktime(time.strptime(m[1] + m[2], "%y%m%d%H%M%S")), name)
+        return (0.0, name)
+    return sorted(paths, key=key, reverse=True)
 
 
 class ThumbLoader(QThread):
@@ -37,6 +60,7 @@ class ThumbLoader(QThread):
                 self.loaded.emit(p, self.t.thumbnail(p))
             except Exception:
                 pass
+            time.sleep(THUMB_GAP_S)  # 259 back-to-back fetches left the window unresponsive (2026-10-27)
 
 
 class Downloader(QThread):
@@ -90,8 +114,9 @@ class FilesPanel(QWidget):
         self.grid.setMovement(QListWidget.Static)
         self.grid.setUniformItemSizes(True)  # fixed cells: inserting at the top can't overlap neighbours
         self.grid.setSelectionMode(QListWidget.ExtendedSelection)
-        self.grid.setMinimumHeight(170)
+        self.grid.setMinimumHeight(THUMB.height() + 40)  # one full row of thumbnails with names
         self.grid.itemDoubleClicked.connect(lambda it: self.download([it.data(Qt.UserRole)]))
+        self.grid.verticalScrollBar().valueChanged.connect(lambda _v: self.want_visible_thumbs())
 
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh)
@@ -213,9 +238,10 @@ class FilesPanel(QWidget):
             return
         self.grid.clear()
         self.items.clear()
-        for p in reversed(paths):
+        newest = newest_first(paths, getattr(self.t, "file_times", None))
+        for p in newest:
             self.add_item(p)
-        self.load_thumbs(list(reversed(paths)))
+        self.load_thumbs(newest[:FIRST_THUMBS])
         self.message.emit(f"{len(paths)} files on the card")
 
     def add_item(self, path: str, top: bool = False):
@@ -240,6 +266,14 @@ class FilesPanel(QWidget):
         self.thumbs = ThumbLoader(self.t, paths, busy=lambda: bool(self.dl and self.dl.isRunning()))
         self.thumbs.loaded.connect(self.set_thumb)
         self.thumbs.start()
+
+    def want_visible_thumbs(self):
+        """Queue thumbnails for items scrolled into view that don't have one yet."""
+        view = self.grid.viewport().rect()
+        missing = [p for p, it in self.items.items()
+                   if it.icon().isNull() and self.grid.visualItemRect(it).intersects(view)]
+        if missing:
+            self.load_thumbs([p for p in missing if not (self.thumbs and p in self.thumbs.paths)])
 
     def set_thumb(self, path: str, data: bytes):
         it = self.items.get(path)

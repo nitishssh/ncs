@@ -18,6 +18,7 @@ from studio_utility.paths import PREFS
 
 FLOOR = -60  # meter range: -60 .. 0 dBFS
 NOISE_SECONDS = 10
+PAIRS_PER_ROW = 2  # voice settings grid
 ADVICE_EVERY = 3.0  # seconds between live suggestion updates
 TIP_COLOR = {"problem": "#ef5350", "warn": "#f9a825", "ok": "#9e9e9e"}
 
@@ -280,7 +281,7 @@ class VoicePanel(QWidget):
         self.vst_clear = QPushButton("Clear plugins")
         self.vst_clear.clicked.connect(self.clear_vst)
         self.vst_label = _cap("")
-        self.auto_clean = QCheckBox("Auto-clean recordings (_voice.wav)")
+        self.auto_clean = QCheckBox("Auto-clean takes")
         self.auto_clean.setToolTip("When a recording stops, also save a denoised, processed copy - no editing later")
         self.auto_clean.setChecked(QSettings(*PREFS).value("audio_auto_clean", True, type=bool))
         self.auto_clean.toggled.connect(lambda on: QSettings(*PREFS).setValue("audio_auto_clean", on))
@@ -291,15 +292,11 @@ class VoicePanel(QWidget):
                (_cap("Low cut"), self.low_cut), (self.gate, None)]
         row2 = [(_cap("Presence"), self.presence), (_cap("Air"), self.air), (_cap("Compression"), self.compress),
                 (_cap("Gain"), self.gain), (self.vst_btn, self.vst_clear)]
-        for r, items in enumerate((row, row2)):
-            c = 0
-            for a, b in items:
-                g.addWidget(a, r, c)
-                if b is not None:
-                    g.addWidget(b, r, c + 1)
-                c += 2
         # cleanup engine, hum, loudness
         self.engine = QComboBox()
+        # sized for the short names, not "... - not installed": the long entry made this tab scroll sideways
+        self.engine.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.engine.setMinimumContentsLength(16)
         for key, name in voice.ENGINES.items():
             self.engine.addItem(name, key)
         self.engine.setToolTip("How the saved _voice.wav is denoised. DeepFilterNet removes changing noise (traffic, "
@@ -323,12 +320,13 @@ class VoicePanel(QWidget):
         self.target.setToolTip("-16 YouTube/podcasts, -14 Spotify/Instagram, -23 broadcast")
         row3 = [(_cap("Cleanup"), self.engine), (self.get_df, None), (self.live_denoise, None),
                 (_cap("Hum"), self.hum), (self.normalize, self.target)]
-        c = 0
-        for a, b in row3:
-            g.addWidget(a, 2, c)
+        # three label/control pairs per row: five per row needed 1314 px and forced a sideways scrollbar
+        for i, (a, b) in enumerate(row + row2 + row3):
+            r, c = divmod(i, PAIRS_PER_ROW)
+            g.addWidget(a, r, c * 2)
             if b is not None:
-                g.addWidget(b, 2, c + 1)
-            c += 2
+                g.addWidget(b, r, c * 2 + 1)
+        last = (len(row + row2 + row3) - 1) // PAIRS_PER_ROW + 1
 
         # 10-band EQ
         self.eq_preset = QComboBox()
@@ -350,9 +348,9 @@ class VoicePanel(QWidget):
             eq_row.addLayout(col)
             self.eq.append(s)
         eq_row.addStretch()
-        g.addLayout(eq_row, 3, 0, 1, 10)
-        g.addWidget(self.vst_label, 4, 0, 1, 6)
-        g.addWidget(self.auto_clean, 4, 6, 1, 4)
+        g.addLayout(eq_row, last, 0, 1, PAIRS_PER_ROW * 2)
+        g.addWidget(self.vst_label, last + 1, 0, 1, 3)
+        g.addWidget(self.auto_clean, last + 1, 3, 1, 3)
 
         self.show_settings(self.settings)
         for w in (self.denoise, self.low_cut, self.presence, self.air, self.gain, self.target, *self.eq):

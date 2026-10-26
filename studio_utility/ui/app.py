@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
         self.preview = Preview("No live view")
         self.preview.setObjectName("preview")
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setMinimumSize(640, 360)
+        self.preview.setMinimumSize(320, 160)  # grows with the window; 360 tall pushed it past a laptop screen
         self.preview.setToolTip("Click to focus here")
         self.preview.clicked.connect(self.focus_at)
 

@@ -69,11 +69,13 @@ def test_meter_colours():
 def test_sources_are_told_apart():
     kinds = {n: audio.source_kind(n) for n in (
         "EOS R50 V", "Cam Link 4K", "USB Video", "MacBook Pro Microphone", "Microphone Array (Realtek(R) Audio)",
-        "Wireless Mic Rx", "Kreo Sonik", "Scarlett 2i2 USB", "BlackHole 2ch", "CABLE Output (VB-Audio Virtual Cable)")}
+        "Wireless Mic Rx", "Kreo Sonik", "Scarlett 2i2 USB", "BlackHole 2ch", "CABLE Output (VB-Audio Virtual Cable)",
+        "Owl 4K PRO Camera")}
     assert kinds == {"EOS R50 V": "camera", "Cam Link 4K": "camera", "USB Video": "camera",
                      "MacBook Pro Microphone": "computer", "Microphone Array (Realtek(R) Audio)": "computer",
                      "Wireless Mic Rx": "external", "Kreo Sonik": "external", "Scarlett 2i2 USB": "external",
-                     "BlackHole 2ch": "virtual", "CABLE Output (VB-Audio Virtual Cable)": "virtual"}
+                     "BlackHole 2ch": "virtual", "CABLE Output (VB-Audio Virtual Cable)": "virtual",
+                     "Owl 4K PRO Camera": "camera"}
 
 
 def test_input_devices_grouped_camera_first(monkeypatch):

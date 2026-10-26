@@ -215,6 +215,7 @@ class EDSDKTransport(Transport):
         self.cam = None
         self.worker: SdkThread | None = None
         self.items: dict[str, int] = {}         # "edsdk:/DCIM/100CANON/IMG_0001.JPG" -> directory item ref
+        self.file_times: dict[str, float] = {}  # same keys -> capture time, for newest-first lists
         self._changes: set[int] = set()         # property IDs changed since the last events() call
         self._added: list[str] = []
         self._lost = False
@@ -531,6 +532,8 @@ class EDSDKTransport(Transport):
                 self.sdk.release(child)
             else:
                 self.items[path] = child
+                if info.get("time"):
+                    self.file_times[path] = info["time"]
                 out.append(path)
 
     def list_files(self) -> list[str]:
@@ -538,6 +541,7 @@ class EDSDKTransport(Transport):
             for ref in self.items.values():
                 self.sdk.release(ref)
             self.items.clear()
+            self.file_times.clear()
             out: list[str] = []
             for vol in self.sdk.children(self.cam):  # memory cards
                 self._walk(vol, "edsdk:", out)
