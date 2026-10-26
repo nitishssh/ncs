@@ -90,3 +90,12 @@ def test_cleaned_report_doesnt_blame_the_limiter(take):
     assert not any(x.title.startswith("Very hot") for x in t.report(cleaned=True).tips)
     t.audio = t.cleaned
     assert any(x.title.startswith("Very hot") for x in t.report(cleaned=False).tips)  # raw: still a real warning
+
+
+def test_a_second_trim_never_replaces_the_first(take):
+    t = editor.Take.load(take)
+    t.set_trim(0.1, 0.5)
+    first = t.export(cleaned=False)
+    t.set_trim(0.2, 0.6)
+    second = t.export(cleaned=False)
+    assert first != second and first.exists() and second.stem.endswith("_edit")

@@ -306,3 +306,25 @@ def test_browser_recordings_are_converted_to_wav(hub, tmp_path, monkeypatch):
     info = sf.info(tmp_path / "phone" / r.json()["name"])
     assert (info.samplerate, info.subtype) == (48000, "PCM_24") and round(info.duration) == 1
     assert list((tmp_path / "phone").iterdir()) == [tmp_path / "phone" / r.json()["name"]]  # upload removed
+
+
+def test_upload_rejects_a_bad_start_time_and_keeps_both_takes(hub, tmp_path, monkeypatch):
+    pytest.importorskip("soundfile")
+    h, base = hub
+    monkeypatch.setattr(server, "PHONE_AUDIO", tmp_path / "phone")
+    c = client(h, base, "Pixel 8")
+    for bad in ("soon", "1e30", "nan"):
+        r = c.post("/api/audio", content=_wav_bytes(), headers={"Content-Type": "audio/wav", "X-Audio-Started": bad})
+        assert r.status_code == 400, bad
+    head = {"Content-Type": "audio/wav", "X-Audio-Started": "1793000000000"}
+    first, second = (c.post("/api/audio", content=_wav_bytes(), headers=head).json()["name"] for _ in range(2))
+    assert first != second and second.endswith("-2.wav")
+    assert sorted(p.name for p in (tmp_path / "phone").iterdir()) == sorted([first, second])
+
+
+def test_failed_conversion_leaves_nothing_behind(hub, tmp_path, monkeypatch):
+    h, base = hub
+    monkeypatch.setattr(server, "PHONE_AUDIO", tmp_path / "phone")
+    r = client(h, base, "iPhone").post("/api/audio", content=b"not audio", headers={"Content-Type": "audio/webm"})
+    assert r.status_code == 502
+    assert list((tmp_path / "phone").iterdir()) == []

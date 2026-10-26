@@ -7,7 +7,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
@@ -116,7 +116,9 @@ class FilesPanel(QWidget):
         self.grid.setSelectionMode(QListWidget.ExtendedSelection)
         self.grid.setMinimumHeight(THUMB.height() + 40)  # one full row of thumbnails with names
         self.grid.itemDoubleClicked.connect(lambda it: self.download([it.data(Qt.UserRole)]))
-        self.grid.verticalScrollBar().valueChanged.connect(lambda _v: self.want_visible_thumbs())
+        self.scroll_settle = QTimer(self, singleShot=True, interval=120)  # one thumbnail check per scroll, not per pixel
+        self.scroll_settle.timeout.connect(self.want_visible_thumbs)
+        self.grid.verticalScrollBar().valueChanged.connect(lambda _v: self.scroll_settle.start())
 
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh)

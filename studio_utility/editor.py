@@ -112,7 +112,13 @@ class Take:
     # ---- export
     def export_path(self, cleaned: bool) -> Path:
         raw = self.raw_path()
-        return raw.with_name(f"{raw.stem}{'_voice' if cleaned else ''}{'_edit' if self.trimmed else ''}.wav")
+        stem = f"{raw.stem}{'_voice' if cleaned else ''}"
+        if not self.trimmed:  # the full take: same content every time, so the name stays fixed
+            return raw.with_name(stem + ".wav")
+        path, n = raw.with_name(stem + "_edit.wav"), 2
+        while path.exists():  # each cut is the user's own work: a new trim never replaces an earlier one
+            path, n = raw.with_name(f"{stem}-{n}_edit.wav"), n + 1  # keeps the _edit ending sync skips
+        return path
 
     def export(self, cleaned: bool, path: Path | None = None) -> Path:
         """Write the selection (or everything) as 24-bit WAV; never overwrites the raw recording."""

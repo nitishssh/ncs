@@ -464,32 +464,41 @@ class Hub:
     async def api_audio_upload(self, request):
         """A phone's mic recording, streamed in (any size). Saved as <start>_Phone_<device>.wav so sync.pair_clips
         lines it up with the clip recorded at the same time; non-WAV uploads (browser webm/mp4) are converted."""
-        started = float(request.headers.get("X-Audio-Started") or time.time() * 1000) / 1000
+        try:
+            started = float(request.headers.get("X-Audio-Started") or time.time() * 1000) / 1000
+            time.localtime(started)
+        except (ValueError, OverflowError, OSError):
+            raise web.HTTPBadRequest(text="X-Audio-Started must be a start time in milliseconds")
         device = "".join(c for c in request.get(DEVICE_NAME, "Phone") if c.isalnum()) or "Phone"
         kind = request.content_type or ""
         ext = ".wav" if "wav" in kind else ".mp4" if "mp4" in kind or "aac" in kind else ".webm"
         PHONE_AUDIO.mkdir(parents=True, exist_ok=True)
         stem = f"{time.strftime('%Y-%m-%d_%H%M%S', time.localtime(started))}_Phone_{device}"
-        raw = PHONE_AUDIO / (stem + (ext if ext != ".wav" else ".part"))
+        wav, n = PHONE_AUDIO / (stem + ".wav"), 2
+        while wav.exists():  # a second take with the same start second must never replace the first
+            wav, n = PHONE_AUDIO / f"{stem}-{n}.wav", n + 1
+        raw = wav.with_suffix(ext + ".part")
         size = 0
-        with raw.open("wb") as f:
-            async for chunk in request.content.iter_chunked(1 << 16):
-                f.write(chunk)
-                size += len(chunk)
-        if not size:
-            raw.unlink()
-            raise web.HTTPBadRequest(text="empty recording")
-        wav = PHONE_AUDIO / (stem + ".wav")
-        if ext == ".wav":
-            raw.replace(wav)
-        else:
-            from studio_utility.sync import ffmpeg_exe
-            cmd = [ffmpeg_exe(), "-v", "error", "-y", "-i", str(raw), "-ar", "48000", "-c:a", "pcm_s24le", str(wav)]
-            proc = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE)
-            _, err = await proc.communicate()
-            if proc.returncode:
-                raise web.HTTPBadGateway(text=f"couldn't convert the recording: {err.decode(errors='replace')[-300:]}")
-            raw.unlink()
+        try:
+            with raw.open("wb") as f:
+                async for chunk in request.content.iter_chunked(1 << 16):
+                    f.write(chunk)
+                    size += len(chunk)
+            if not size:
+                raise web.HTTPBadRequest(text="empty recording")
+            if ext == ".wav":
+                raw.replace(wav)
+            else:
+                from studio_utility.sync import ffmpeg_exe
+                cmd = [ffmpeg_exe(), "-v", "error", "-y", "-i", str(raw),
+                       "-ar", "48000", "-c:a", "pcm_s24le", str(wav)]
+                proc = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE)
+                _, err = await proc.communicate()
+                if proc.returncode:
+                    wav.unlink(missing_ok=True)
+                    raise web.HTTPBadGateway(text=f"couldn't convert the recording: {err.decode(errors='replace')[-300:]}")
+        finally:  # a dropped connection or failed conversion leaves no half-written file behind
+            raw.unlink(missing_ok=True)
         self.publish({"type": "audio", "by": request.get(DEVICE_NAME, "device"), "name": wav.name})
         return web.json_response({"ok": True, "name": wav.name, "bytes": wav.stat().st_size})
 

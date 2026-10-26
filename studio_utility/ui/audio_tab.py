@@ -199,14 +199,20 @@ class MicSlot(QWidget):
         self.learn.setText("Listening… stay silent")
 
         def work():
-            noise = mic.capture(NOISE_SECONDS)
-            voice.save_profile(mic.device, noise)
-            self.bridge.done.emit(f"{voice.noise_floor_db(noise):.0f}")
+            try:
+                noise = mic.capture(NOISE_SECONDS)
+                voice.save_profile(mic.device, noise)
+                self.bridge.done.emit(f"{voice.noise_floor_db(noise):.0f}")
+            except Exception as e:  # the mic was switched or closed mid-capture: don't leave the button stuck
+                self.bridge.done.emit(f"error:{e}")
         threading.Thread(target=work, daemon=True).start()
 
     def _learned(self, floor: str):
         self.learn.setEnabled(True)
         self.learn.setText(f"Learn noise ({NOISE_SECONDS} s)")
+        if floor.startswith("error:"):
+            self.message.emit(f"{self.title}: couldn't learn room noise: {floor[6:]}")
+            return
         self.show_noise_state()
         self.apply_voice()  # the gate threshold follows the new noise floor
         self.message.emit(f"{self.title}: learned room noise at {floor} dB")
@@ -246,6 +252,7 @@ class MicSlot(QWidget):
             self.tips.setText("")
             return
         self.tips.setText(tips_html(report.tips[:3]))
+
     def close(self):
         if self.mic:
             self.mic.close()
