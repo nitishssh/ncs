@@ -10,6 +10,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QSettings  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from studio_utility import paths  # noqa: E402
+
 
 @pytest.fixture(scope="session")
 def app():
@@ -26,7 +28,7 @@ def spin(app, seconds):
 @pytest.fixture
 def win(app, tmp_path):
     from studio_utility.ui.app import MainWindow
-    QSettings("studio-utility", "Studio Utility").clear()
+    QSettings(*paths.PREFS).clear()
     w = MainWindow()
     w.files.root = tmp_path / "imports"
     w.show()
@@ -96,7 +98,7 @@ def test_slow_connection_does_not_block_ui(app, monkeypatch):
         return real_load(*args, **kwargs)
 
     monkeypatch.setattr(transports, "load", slow_load)
-    QSettings("studio-utility", "Studio Utility").clear()
+    QSettings(*paths.PREFS).clear()
     window = MainWindow()
     started = time.monotonic()
     window.connect_to("mock", "")
@@ -150,3 +152,110 @@ def test_builtin_log_preview_lut(win, app):
     assert win.lut_btn.text() == f"LUT: {name}" and not win.preview.pixmap().isNull()
     win.set_lut(None, None)
     assert win.lut_btn.text() == "LUT: off"
+
+
+def test_camera_audio_settings_in_audio_tab(win, app):
+    assert win.audio.camera_box.isVisibleTo(win.audio)
+    box = win.boxes["wind_filter"]
+    box.setCurrentIndex(box.findData("off"))
+    spin(app, 0.2)
+    assert win.t.values["wind_filter"] == "off"
+
+
+def test_audio_editor_opens_trims_and_exports(win, app, tmp_path):
+    import numpy as np
+    import soundfile as sf
+    path = tmp_path / "2026-10-26_143005_MicA_X.wav"
+    sf.write(path, 0.2 * np.sin(np.arange(48000 * 2) / 10)[:, None], 48000, subtype="PCM_24")
+    win.audio.open_editor(path)
+    ed = win.audio.editor
+    spin(app, 0.3)
+    assert ed.isVisible() and ed.take.duration == 2.0 and "not cleaned yet" in ed.info.text()
+    ed.take.set_trim(0.5, 1.5)
+    ed.show_state()
+    assert ed.reset_btn.isEnabled() and "keeping" in ed.info.text()
+    ed.wave.grab()  # paints raw + selection without errors
+    ed.export(False)
+    assert (tmp_path / "2026-10-26_143005_MicA_X_edit.wav").exists()
+    ed.close()
+
+
+def test_tests_never_touch_the_real_app_settings():
+    from studio_utility.ui import app as app_module
+    assert paths.PREFS != ("studio-utility", "Studio Utility") and app_module.PREFS == paths.PREFS
+
+
+def test_quitting_does_not_crash(tmp_path):
+    """Smoke test of the start-up/quit path in a fresh interpreter. The real crash (SIGSEGV in ~QPushButton at exit)
+    only showed up after camera + Files use and does not reproduce headless; this guards finish() itself."""
+    import subprocess
+    import sys
+    code = (
+        "import os, sys\n"
+        "from studio_utility import paths; paths.PREFS = ('studio-utility-test', 'Studio Utility Test')\n"
+        "from PySide6.QtCore import QTimer\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "from studio_utility.ui import app as m\n"
+        "app = QApplication([])\n"
+        "win = m.MainWindow(); win.show()\n"
+        "win.audio.open_editor(None) if False else None\n"
+        "QTimer.singleShot(500, win.close); QTimer.singleShot(700, app.quit)\n"
+        "sys.exit(m.finish(app, win, app.exec()))\n")
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen", "HOME": str(tmp_path)}
+    p = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr[-2000:]
+
+
+def test_rec_button_never_stays_disabled_when_a_command_is_pending(win, app, monkeypatch):
+    monkeypatch.setattr(win.io, "submit", lambda *a, **k: False)  # an earlier Rec still in flight
+    win.toggle_record()
+    assert win.rec.isEnabled() and "still answering" in win.msg.text()
+
+
+def test_reconnect_backs_off_instead_of_hammering_the_camera():
+    from studio_utility.ui.app import retry_delay
+    assert [retry_delay(n) for n in range(0, 8)] == [5000, 5000, 10000, 20000, 40000, 60000, 60000, 60000]
+
+
+def test_card_list_is_newest_first_across_photos_and_movies():
+    """Seen on the R50 V: every photo was listed before a clip shot a minute earlier."""
+    from studio_utility.ui.files import newest_first
+    paths = ["edsdk:/DCIM/100CANON/IMG_0145.JPG", "edsdk:/DCIM/100CANON/IMG_0146.JPG",
+             "edsdk:/XFVC/A_0001C049A261027_013258E6_CANON.MP4", "edsdk:/XFVC/A_0001C051A261027_0159138U_CANON.MP4"]
+    by_name_only = newest_first(paths)
+    assert by_name_only[0].endswith("C051A261027_0159138U_CANON.MP4")  # movie names carry the time
+    times = {paths[0]: 1000.0, paths[1]: 9e9, paths[2]: 2000.0, paths[3]: 3000.0}
+    assert newest_first(paths, times)[0].endswith("IMG_0146.JPG")    # transport times win
+
+
+def test_files_panel_fetches_only_the_first_thumbnails(app, monkeypatch):
+    """259 thumbnails fetched back to back froze the window over USB: fetch the newest few, the rest on scroll."""
+    from studio_utility.ui import files
+    asked = []
+
+    class Loader:
+        def __init__(self, t, paths, busy=None):
+            asked.extend(paths)
+            self.paths = list(paths)
+            self.loaded = type("S", (), {"connect": lambda *_: None})()
+
+        def start(self):
+            pass
+
+        def isRunning(self):
+            return True
+
+    monkeypatch.setattr(files, "ThumbLoader", Loader)
+    panel = files.FilesPanel()
+    panel.t = type("T", (), {"list_files": lambda self: [f"edsdk:/DCIM/IMG_{n:04}.JPG" for n in range(259)]})()
+    panel.caps = {"thumbnail"}
+    panel.refresh()
+    assert len(asked) == files.FIRST_THUMBS and asked[0].endswith("IMG_0258.JPG")
+
+
+def test_movie_tab_explains_when_the_link_has_no_movie_settings(win, app):
+    win.apply_settings({})  # e.g. EDSDK on the R50 V: no movie properties
+    assert win.movie_note.isVisibleTo(win)
+    win.load_settings()
+    spin(app, 0.3)
+    assert not win.movie_note.isVisibleTo(win)  # the mock camera has them

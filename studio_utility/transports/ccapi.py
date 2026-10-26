@@ -20,6 +20,12 @@ SETTINGS = {
     "canon_log": "canonlog",                  # unverified path
     "log_assist": "viewassist",               # unverified path
     "hdr_pq": "hdrpq",                        # unverified path
+    # Camera's own movie sound (manual: Sound rec., level, wind filter, attenuator) - unverified paths;
+    # the Audio tab hides whichever the body doesn't answer
+    "sound_recording": "soundrecording",
+    "sound_level": "soundrecordinglevel",
+    "wind_filter": "windfilter",
+    "attenuator": "attenuator",
 }
 # Verified on R50 V fw 1.2.0 (2026-10-23). Not available on this body: movierecordingformat,
 # moviemode setting, movieservoaf, shootingmodedial - those keys are left out so the UI disables them.

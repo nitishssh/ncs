@@ -7,6 +7,8 @@
     <!-- Bonjour/NSD discovery of the Studio Hub on the local network -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- phone mic recordings for the hub (MIC button) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- installing updates downloaded from GitHub releases (Updates.java); the user confirms each one -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />

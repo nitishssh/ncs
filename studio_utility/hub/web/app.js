@@ -210,7 +210,9 @@ function apply(ev) {
     toast(`New on card: ${ev.added.map((p) => p.split("/").pop()).join(", ")}`);
     if (filesLoaded) loadFiles();
   }
+  if (ev.type === "audio" && ev.by !== DEVICE) toast(`Audio saved from ${ev.by}`);
   render();
+  followMic();
 }
 async function loadState() {
   try {
@@ -219,8 +221,65 @@ async function loadState() {
     state.clockSkew = s.server_time - Date.now() / 1000;
     seq = s.seq;
     render();
+    followMic();
   } catch (e) { /* follow() retries */ }
 }
+
+// ---------- phone mic: when MIC is on, this device records its own mic while the camera records, then uploads
+// the take to the hub (named by start time, so it lines up with the clip). The Android app records natively;
+// browsers only allow the mic on https/localhost pages, so plain-http pages explain that instead.
+const native = window.StudioAndroid;
+let micOn = false, micBusy = false, recorder = null, micStarted = 0;
+try { micOn = localStorage.getItem("mic") === "1"; } catch (e) { /* default off */ }
+const micPossible = () => !!native || (window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder);
+function showMic() { $("mic").classList.toggle("on", micOn); $("mic").classList.toggle("rec", micBusy); }
+$("mic").onclick = () => {
+  haptic();
+  if (!micOn && !micPossible()) {
+    toast("Phone mic needs the Studio Utility app (browsers block the mic on this http page)");
+    return;
+  }
+  micOn = !micOn;
+  try { localStorage.setItem("mic", micOn ? "1" : "0"); } catch (e) { /* not remembered */ }
+  if (micOn && native) native.prepareMic();  // asks for the microphone permission now, not mid-take
+  toast(micOn ? "Phone mic will record with the camera" : "Phone mic off");
+  showMic();
+  followMic();
+};
+async function followMic() {
+  const want = micOn && !!state.recording;
+  if (want === micBusy) return;
+  micBusy = want;
+  showMic();
+  if (want) micStarted = Math.round(Date.now() + (state.clockSkew || 0) * 1000);  // in the hub's clock
+  if (native) {
+    want ? native.startMic() : native.stopMic(DEVICE, String(micStarted));
+    return;
+  }
+  try {
+    if (want) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      const chunks = [];
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      recorder.onstop = () => { stream.getTracks().forEach((t) => t.stop()); upload(new Blob(chunks, { type: recorder.mimeType })); };
+      recorder.start(1000);
+    } else if (recorder) {
+      recorder.stop();
+    }
+  } catch (e) {
+    micBusy = false;
+    showMic();
+    toast("Mic: " + e.message);
+  }
+}
+async function upload(blob) {
+  const r = await fetch("/api/audio", { method: "POST", body: blob,
+    headers: { "Content-Type": blob.type || "audio/webm", "X-Studio-Device": DEVICE, "X-Audio-Started": String(micStarted) } });
+  toast(r.ok ? `Phone audio saved: ${(await r.json()).name}` : "Phone audio upload failed: " + (await r.text()));
+}
+window.studioMicDone = (ok, msg) => toast(ok ? `Phone audio saved: ${msg}` : `Phone mic: ${msg}`);  // from the app
+showMic();
 
 // ---------- live view: fetch frames in a loop while visible (works on every browser, unlike MJPEG <img>)
 let liveOn = false, lastUrl = null;

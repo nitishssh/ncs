@@ -135,7 +135,8 @@ def best_voice_file(raw: Path) -> Path:
 def pair_clips(folder: Path, window_s: float = 120) -> list[tuple[Path, Path]]:
     """(clip, voice wav) pairs whose start times are within window_s; one voice per clip (Mic A preferred).
     Clips that already have a _final.mp4 are skipped."""
-    raws = [w for w in folder.glob("*.wav") if not w.stem.endswith("_voice") and voice_start(w)]
+    raws = [w for w in folder.glob("*.wav")  # editor exports (_edit) are the user's own cuts: not paired
+            if not w.stem.endswith(("_voice", "_edit")) and voice_start(w)]
     pairs = []
     for clip in sorted(p for p in folder.iterdir() if p.suffix.lower() in VIDEO_EXT and not p.stem.endswith("_final")):
         if clip.with_name(clip.stem + "_final.mp4").exists():
@@ -149,6 +150,29 @@ def pair_clips(folder: Path, window_s: float = 120) -> list[tuple[Path, Path]]:
             pairs.append((clip, best_voice_file(near[0])))
     return pairs
 
+QUIET_VOICE_DB = -45.0  # loud parts of a take below this: the voice is too faint to be worth much
+
+
+def _loud_db(x: np.ndarray, rate: int = ANALYSIS_RATE) -> float:
+    """Level of the loudest 20% of 50 ms frames (the voice, when someone talks)."""
+    n = int(0.05 * rate)
+    if len(x) < n:
+        return -120.0
+    fr = x[: len(x) // n * n].reshape(-1, n)
+    db = np.sort(20 * np.log10(np.sqrt((fr ** 2).mean(axis=1)) + 1e-9))
+    return float(db[-max(1, len(db) // 5):].mean())
+
+
+def clip_sound_problem(clip: Path) -> str | None:
+    """Why a camera clip's own sound is unusable, or None. Found the hard way: a 4-minute demo came off the card
+    with no audio track at all (Sound rec. was off) and nothing said so."""
+    if not media_info(clip)["has_audio"]:
+        return "no sound track - turn on Sound rec. in the camera's menu"
+    level = _loud_db(read_audio(clip, seconds=120))
+    if level < QUIET_VOICE_DB:
+        return f"camera sound is nearly silent ({level:.0f} dBFS) - check the mic input and Rec. level"
+    return None
+
 
 @dataclass
 class SyncResult:
@@ -157,6 +181,7 @@ class SyncResult:
     offset: Offset | None = None
     output: Path | None = None
     error: str | None = None
+    warning: str | None = None  # merged, but worth knowing (e.g. the mic voice is very faint)
 
 
 def sync_clip(clip: Path, voice: Path) -> SyncResult:
@@ -168,7 +193,11 @@ def sync_clip(clip: Path, voice: Path) -> SyncResult:
             return r
         # The raw recording carries the same room sound as the camera mic; align with it, merge the clean one
         raw = voice.with_name(voice.stem.removesuffix("_voice") + ".wav")
-        r.offset = find_offset(read_audio(clip), read_audio(raw if raw.exists() else voice))
+        mic = read_audio(raw if raw.exists() else voice)
+        r.offset = find_offset(read_audio(clip), mic)
+        level = _loud_db(mic)
+        if level < QUIET_VOICE_DB:
+            r.warning = f"mic voice is very quiet ({level:.0f} dBFS raw) - raise the mic's gain or move it closer"
         if not r.offset.ok:
             r.error = (f"no clear match (confidence {r.offset.confidence:.1f}, similarity "
                        f"{r.offset.similarity:.2f}); left unmerged")

@@ -24,6 +24,7 @@ PROP = {
     "tv": 0x00000406,
     "exposure": 0x00000407,
     "shots_left": 0x0000040A,
+    "lens_name": 0x0000040D,     # "RF-S14-30mm F4-6.3 IS STM PZ"
     "evf_output": 0x00000500,    # live view output device: bit 1 = TFT, bit 2 = PC
     "evf_mode": 0x00000501,
     "evf_af_mode": 0x0000050E,
@@ -70,6 +71,8 @@ ERR = {  # from Canon's EDSDKErrors.h (13.20.21)
     0x00002019: "camera busy", 0x0000A102: "object not ready (live view starting)",
     0x0000A104: "live view not running on the camera",
     0x00008D01: "take picture: AF failed", 0x00008D07: "take picture: card error", 0x00008D08: "take picture: no card",
+    # observed, not from the header: the R50 V answers a stills command with this on the movie side (2026-10-27)
+    0x00008D0C: "can't take a photo in movie mode - set the photo/movie switch to photo",
 }
 # the session is gone (dial turned, cable pulled, camera off): reconnect instead of retrying
 LOST = {0x00000061, 0x00000080, 0x00000082, 0x000000C1, 0x000000C4, 0x00002003}

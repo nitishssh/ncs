@@ -64,3 +64,43 @@ def test_device_labels():
 def test_meter_colours():
     from studio_utility.ui.audio_tab import GREEN, RED, YELLOW, meter_style
     assert [meter_style(x) for x in (-30, -6, -1)] == [GREEN, YELLOW, RED]
+
+
+def test_sources_are_told_apart():
+    kinds = {n: audio.source_kind(n) for n in (
+        "EOS R50 V", "Cam Link 4K", "USB Video", "MacBook Pro Microphone", "Microphone Array (Realtek(R) Audio)",
+        "Wireless Mic Rx", "Kreo Sonik", "Scarlett 2i2 USB", "BlackHole 2ch", "CABLE Output (VB-Audio Virtual Cable)",
+        "Owl 4K PRO Camera")}
+    assert kinds == {"EOS R50 V": "camera", "Cam Link 4K": "camera", "USB Video": "camera",
+                     "MacBook Pro Microphone": "computer", "Microphone Array (Realtek(R) Audio)": "computer",
+                     "Wireless Mic Rx": "external", "Kreo Sonik": "external", "Scarlett 2i2 USB": "external",
+                     "BlackHole 2ch": "virtual", "CABLE Output (VB-Audio Virtual Cable)": "virtual",
+                     "Owl 4K PRO Camera": "camera"}
+
+
+def test_input_devices_grouped_camera_first(monkeypatch):
+    if audio.sd is None:
+        pytest.skip("sounddevice not installed")
+    devs = [{"name": n, "max_input_channels": c, "max_output_channels": 0, "default_samplerate": 48000}
+            for n, c in (("BlackHole 2ch", 2), ("Wireless Mic Rx", 2), ("MacBook Pro Microphone", 1), ("EOS R50 V", 2))]
+    monkeypatch.setattr(audio.sd, "query_devices", lambda *a: devs)
+    assert [d.kind for d in audio.input_devices()] == ["camera", "computer", "external", "virtual"]
+
+
+def test_mono_laptop_mic_opens_mono(monkeypatch):
+    if audio.sd is None:
+        pytest.skip("sounddevice not installed")
+    monkeypatch.setattr(audio.sd, "query_devices", lambda *a: {"max_input_channels": 1, "max_output_channels": 0})
+    monkeypatch.setattr(audio.sd, "InputStream", lambda **kw: FakeStream(**kw))
+    m = audio.MicInput("MacBook Pro Microphone")
+    assert m.channels == 1
+    m.stream.feed(0.1)
+    assert len(m.levels()) == 1
+    m.close()
+
+
+def test_recent_keeps_a_rolling_window(mic):
+    for _ in range(200):  # 200 x 4800 frames = 20 s, more than the window
+        mic.fake.feed(0.1)
+    assert len(mic.recent()) <= (audio.RECENT_S * audio.RATE // 1024 + 1) * 4800
+    assert len(mic.recent()) > 0

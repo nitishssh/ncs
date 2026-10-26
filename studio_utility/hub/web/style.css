@@ -90,6 +90,7 @@ main { flex: 1; position: relative; overflow: hidden; min-height: 0; }
   transition: transform .15s var(--spring), background .15s; }
 .tool:active, .tool.held { transform: scale(.94); background: #2c2c30; }
 .tool.on { color: #000; background: var(--amber); }
+#mic.rec { color: #fff; background: #e53935; }
 .zoom { display: flex; gap: 8px; margin-left: auto; }
 
 /* ---------- settings list */
