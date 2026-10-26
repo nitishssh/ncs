@@ -406,8 +406,14 @@ class EDSDKTransport(Transport):
         self._run(go)
 
     def record(self, start: bool) -> None:
-        self._run(self.sdk.set_property, self.cam, codes.PROP["record"],
-                  codes.RECORD_START if start else codes.RECORD_STOP)
+        try:
+            self._run(self.sdk.set_property, self.cam, codes.PROP["record"],
+                      codes.RECORD_START if start else codes.RECORD_STOP)
+        except EdsError as e:
+            # the R50 V answers "device busy" when the mode dial is on a stills mode (found with A+)
+            if start and e.code == codes.ERR_DEVICE_BUSY:
+                raise RuntimeError("the camera can't record in this mode: turn the mode dial to a movie mode") from e
+            raise
         self._rec_since = time.time() if start else None
 
     # ---- live view

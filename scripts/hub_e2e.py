@@ -40,8 +40,11 @@ def main(base: str, token: str) -> int:
         assert all(f[:2] == b"\xff\xd8" for f in frames), "not JPEG"
         return f"5 frames, {len(frames[-1]) // 1024} KB each"
     check("live view", live)
-    check("live view, Canon Log 3 → Rec.709 preview",
-          lambda: f"{len(c.get('/api/live.jpg', params={'lut': 'clog3'}).content) // 1024} KB")
+    def graded():
+        frame = c.get("/api/live.jpg", params={"lut": "clog3"}).content
+        assert frame[:2] == b"\xff\xd8", "not JPEG"
+        return f"{len(frame) // 1024} KB"
+    check("live view, Canon Log 3 → Rec.709 preview", graded)
 
     def round_trip(key):
         def go():

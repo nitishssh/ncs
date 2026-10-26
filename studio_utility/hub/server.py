@@ -12,6 +12,8 @@ Run:  python -m studio_utility.hub --camera 10.11.0.2:8090      (or --camera moc
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 import sys
 import json
 import secrets
@@ -92,6 +94,23 @@ def device_name(user_agent: str) -> str:
     return "Browser"
 
 
+def canon_on_usb() -> bool:
+    """macOS: does the system itself list a Canon USB device (vendor 0x04A9)?"""
+    try:
+        out = subprocess.run(["ioreg", "-p", "IOUSB", "-l", "-w0"], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return False
+    return '"idVendor" = 1193' in out
+
+
+def restart_for_stale_usb(had_usb: bool, error: str) -> bool:
+    """macOS: after the camera is unplugged, Canon's SDK in this process never sees it again (ImageCaptureCore
+    keeps a suspended connection; a fresh process finds it in seconds - found 2026-10-26). When launchd runs
+    the hub (scripts/mac_hub_autostart.sh) it restarts it, so exit and come back fresh."""
+    return (sys.platform == "darwin" and had_usb and "no camera on USB" in error
+            and os.environ.get("XPC_SERVICE_NAME", "").startswith("com.studio-utility") and canon_on_usb())
+
+
 class Hub:
     def __init__(self, kind: str = "wifi", prefer_usb: bool = False, **camera_kwargs):
         self.kind, self.camera_kwargs = kind, camera_kwargs
@@ -113,6 +132,7 @@ class Hub:
         self.viewers = 0
         self.loop: asyncio.AbstractEventLoop | None = None
         self.stopping = False
+        self.had_usb = False  # a USB camera was connected earlier in this process
 
     def save_access(self):
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
@@ -211,10 +231,15 @@ class Hub:
                         except Exception:
                             pass
                     self.t, self.caps = t, caps
+                    self.had_usb = self.had_usb or t.name == "usb-edsdk"
                     self.publish({"type": "connected", "connection": "connected", "caps": sorted(caps),
                                   "info": {"model": info.model, "firmware": info.firmware},
                                   "settings": settings, "status": self.safe_status()})
                 except Exception as e:
+                    if restart_for_stale_usb(self.had_usb, str(e)):
+                        print("Camera is back on USB but the SDK can't see it: exiting so launchd restarts the hub",
+                              flush=True)
+                        os._exit(75)
                     self.publish({"type": "connection", "connection": f"waiting for camera ({str(e)[:60]})"})
                     time.sleep(5)
                     continue

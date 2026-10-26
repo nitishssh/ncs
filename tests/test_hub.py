@@ -251,3 +251,18 @@ def test_live_view_failures_dont_drop_the_camera(hub):
         assert r.status_code == 503
     assert "object not ready" in r.text
     assert h.t is t and c.get("/api/settings/iso").status_code == 200
+
+
+def test_restart_for_stale_usb_only_under_launchd_on_mac(monkeypatch):
+    from studio_utility.hub import server
+    monkeypatch.setattr(server.sys, "platform", "darwin")
+    monkeypatch.setattr(server, "canon_on_usb", lambda: True)
+    monkeypatch.setenv("XPC_SERVICE_NAME", "com.studio-utility.hub")
+    err = "usb-edsdk: no camera on USB: set the camera's USB connection; wifi: timed out"
+    assert server.restart_for_stale_usb(True, err)
+    assert not server.restart_for_stale_usb(False, err)  # never had the camera: a fresh process wouldn't help
+    monkeypatch.setattr(server, "canon_on_usb", lambda: False)
+    assert not server.restart_for_stale_usb(True, err)  # really unplugged: keep waiting
+    monkeypatch.setattr(server, "canon_on_usb", lambda: True)
+    monkeypatch.delenv("XPC_SERVICE_NAME")
+    assert not server.restart_for_stale_usb(True, err)  # run by hand: nobody would restart it
