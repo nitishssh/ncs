@@ -161,6 +161,14 @@ def test_shoot_focus_and_record(t, fake):
     assert fake.props[codes.PROP["record"]] == codes.RECORD_STOP
 
 
+def test_record_in_a_stills_mode_says_to_switch_to_movie(t, fake):
+    def busy(ref, pid, value, param=0):
+        raise EdsError("set property 0x510", codes.ERR_DEVICE_BUSY)
+    fake.set_property = busy
+    with pytest.raises(RuntimeError, match="movie mode"):
+        t.record(True)
+
+
 def test_live_view_turns_on_pc_output_and_waits_for_first_frame(t, fake):
     assert t.liveview_frame() == b"\xff\xd8frame\xff\xd9"
     assert fake.props[codes.PROP["evf_output"]] & codes.EVF_OUTPUT_PC  # kept the camera screen bit too
