@@ -421,3 +421,27 @@ def test_mac_keeps_one_sdk_alive_so_reconnect_finds_the_camera(monkeypatch):
         tr.connect()
         tr.disconnect()
     assert fake.running == 1  # initialized once, never terminated (a second initialize would have raised)
+
+
+def test_quitting_shuts_the_resident_sdk_down(monkeypatch):
+    """Left running, the dead process kept the camera: the next launch found 'no camera on USB'."""
+    from studio_utility.transports import edsdk as mod
+    monkeypatch.setattr(mod, "_resident", {})
+    fake = FakeSdk()
+    tr = EDSDKTransport(sdk_factory=lambda: fake)
+    tr.keep_sdk_alive = True
+    tr.connect()
+    tr.disconnect()
+    assert fake.running == 1
+    mod.release_resident()
+    assert fake.running == 0 and mod._resident == {}
+    mod.release_resident()  # quitting twice (closeEvent, then atexit) is harmless
+
+
+def test_photo_in_movie_mode_says_so(t, fake):
+    """Seen on the R50 V: Shoot on the movie side failed with a bare 'EDSDK error 0x00008D0C'."""
+    def refuse(cam, cmd, param=0):
+        raise EdsError("command 0x4", 0x8D0C)
+    fake.command = refuse
+    with pytest.raises(EdsError, match="photo/movie switch to photo"):
+        t.shoot()

@@ -832,6 +832,8 @@ class MainWindow(QMainWindow):
         self.retry.stop()
         if self.t:
             self.disconnect()
+        if "studio_utility.transports.edsdk" in sys.modules:  # Canon's SDK, kept up on macOS: release the camera
+            sys.modules["studio_utility.transports.edsdk"].release_resident()
         self.files.wait_retired()
         super().closeEvent(e)
 

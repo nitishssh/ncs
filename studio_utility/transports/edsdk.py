@@ -6,6 +6,7 @@ also pumps the SDK's event queue. Values use the same raw strings as the CCAPI t
 so labels, presets and the web app work unchanged."""
 from __future__ import annotations
 
+import atexit
 import queue
 import struct
 import sys
@@ -166,6 +167,17 @@ def _sdk_thread() -> SdkThread:
 _resident: dict = {}
 
 
+def release_resident() -> None:
+    """Shut the process-wide SDK down - on quit. Skipping it left the camera claimed by the dead process: the next
+    launch saw 'no camera on USB' until a replug (2026-10-27)."""
+    sdk = _resident.pop("sdk", None)
+    if sdk is not None:
+        try:
+            sdk.terminate()
+        except Exception:
+            pass
+
+
 def _close_leftover():
     """A connect that outlived its timeout can still open the camera later; close that session before opening
     a new one, or the camera answers 'communication port in use' until the hub restarts."""
@@ -245,6 +257,7 @@ class EDSDKTransport(Transport):
             self.sdk.initialize()
             if self.keep_sdk_alive:
                 _resident["sdk"] = self.sdk
+                atexit.register(release_resident)  # also covers quitting without a disconnect
         try:
             cams = self.sdk.cameras()
             for _ in range(30 if sys.platform == "darwin" else 0):  # macOS reports USB cameras a moment later
