@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import atexit
 import queue
+import re
 import struct
 import sys
 import threading
@@ -21,7 +22,8 @@ from studio_utility.edsdk_native import EdsError
 SETTINGS = ("mode", "iso", "tv", "av", "exposure", "wb", "picture_style",
             # USB-only: not in the camera's Wi-Fi API
             "zoom_speed", "color_temp", "wb_shift_ab", "wb_shift_gm", "color_filter", "clip_prefix", "clip_name")
-WB_SHIFT = {"wb_shift_ab": 0, "wb_shift_gm": 1}  # index into kEdsPropID_WhiteBalanceShift's int32[2]
+WB_SHIFT = {"wb_shift_ab": 0, "wb_shift_gm": 1}
+KEEP_AWAKE_S = 60  # reset the camera's auto power-off this often while connected (it slept mid-session, 2026-10-27)  # index into kEdsPropID_WhiteBalanceShift's int32[2]
 
 
 def _pid(key: str) -> int:
@@ -216,6 +218,7 @@ class EDSDKTransport(Transport):
         self.worker: SdkThread | None = None
         self.items: dict[str, int] = {}         # "edsdk:/DCIM/100CANON/IMG_0001.JPG" -> directory item ref
         self.file_times: dict[str, float] = {}  # same keys -> capture time, for newest-first lists
+        self._awake_at = 0.0  # last ExtendShutDownTimer sent
         self._changes: set[int] = set()         # property IDs changed since the last events() call
         self._added: list[str] = []
         self._lost = False
@@ -381,7 +384,19 @@ class EDSDKTransport(Transport):
             ability = [a for a in ability if not a.startswith("0x")]
             if len(ability) == 1:  # one option is no choice: e.g. ISO fixed to auto in P (value = live ISO)
                 ability = []
-        return {"value": codes.to_value(key, code), "ability": ability}
+        value = codes.to_value(key, code)
+        if key == "av" and not ability and not self._lens_can(value):
+            value = "auto"  # placeholder while the camera picks the iris: read as f/1.0 on an F4 lens (2026-10-27)
+        return {"value": value, "ability": ability}
+
+    def _lens_can(self, av: str) -> bool:
+        """Is this f-number possible on the attached lens? Its name carries the widest aperture ('... F4-6.3 ...')."""
+        try:
+            name = str(self.sdk.get_property(self.cam, codes.PROP["lens_name"]))
+            widest = float(re.search(r"F(\d+(?:\.\d+)?)", name)[1])
+            return float(av.lstrip("f")) >= widest - 0.05
+        except Exception:
+            return True  # unknown lens or value: don't second-guess the camera
 
     def get_setting(self, key: str) -> dict:
         if key not in SETTINGS:
@@ -509,6 +524,12 @@ class EDSDKTransport(Transport):
     # ---- status
     def status(self) -> dict:
         def read():
+            if time.time() - self._awake_at >= KEEP_AWAKE_S:  # while connected the camera mustn't power off
+                try:
+                    self.sdk.command(self.cam, codes.CMD_EXTEND_SHUTDOWN, 0)
+                    self._awake_at = time.time()
+                except Exception:
+                    pass
             out = {"temp": "normal",
                    "recording": int(time.time() - self._rec_since) if self._rec_since else None}
             try:

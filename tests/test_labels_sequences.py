@@ -127,3 +127,8 @@ def test_clog3_curve_matches_canon_and_lut_exports(tmp_path):
     assert abs(float(table[i, i, i].mean()) - 0.41) < 0.02  # mid grey lands at Rec.709 mid grey
     path = lut.write_cube(table, tmp_path / "clog3.cube", "test")
     assert np.allclose(lut.load_cube(path), table, atol=1e-5)
+
+
+def test_unnamed_camera_codes_read_as_other():
+    from studio_utility.labels import label
+    assert label("mode", "0x43") == "Other (0x43)"

@@ -445,3 +445,28 @@ def test_photo_in_movie_mode_says_so(t, fake):
     fake.command = refuse
     with pytest.raises(EdsError, match="photo/movie switch to photo"):
         t.shoot()
+
+
+def test_aperture_placeholder_reads_auto_not_f1(t, fake):
+    """R50 V in P/movie auto: Av came back as 0x08 (f/1.0) on an F4 lens with no real choices."""
+    from studio_utility import edsdk_codes as codes
+    get = fake.get_property
+
+    def prop(cam, pid):
+        if pid == codes.PROP["av"]:
+            return 0x08
+        if pid == codes.PROP["lens_name"]:
+            return "RF-S14-30mm F4-6.3 IS STM PZ"
+        return get(cam, pid)
+    fake.get_property = prop
+    fake.property_options = lambda cam, pid: [0xF30]
+    assert t.get_setting("av") == {"value": "auto", "ability": []}
+
+
+def test_keeps_the_camera_awake_while_connected(t, fake, monkeypatch):
+    from studio_utility import edsdk_codes as codes
+    sent = []
+    fake.command = lambda cam, cmd, param=0: sent.append(cmd)
+    t.status()
+    t.status()  # within a minute: no second command
+    assert sent.count(codes.CMD_EXTEND_SHUTDOWN) == 1

@@ -24,6 +24,7 @@ PROP = {
     "tv": 0x00000406,
     "exposure": 0x00000407,
     "shots_left": 0x0000040A,
+    "lens_name": 0x0000040D,     # "RF-S14-30mm F4-6.3 IS STM PZ"
     "evf_output": 0x00000500,    # live view output device: bit 1 = TFT, bit 2 = PC
     "evf_mode": 0x00000501,
     "evf_af_mode": 0x0000050E,

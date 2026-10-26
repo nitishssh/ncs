@@ -42,6 +42,8 @@ def _exposure(v: str) -> str | None:
 
 def label(key: str, value) -> str:
     v = str(value)
+    if re.fullmatch(r"0x[0-9A-Fa-f]+", v):  # a code the transport has no name for (R50 V movie mode 0x43)
+        return f"Other ({v})"
     if key == "movie_size":
         return _movie_quality(v) or v
     if key == "color_temp" and v.isdigit():

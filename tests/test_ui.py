@@ -251,3 +251,11 @@ def test_files_panel_fetches_only_the_first_thumbnails(app, monkeypatch):
     panel.caps = {"thumbnail"}
     panel.refresh()
     assert len(asked) == files.FIRST_THUMBS and asked[0].endswith("IMG_0258.JPG")
+
+
+def test_movie_tab_explains_when_the_link_has_no_movie_settings(win, app):
+    win.apply_settings({})  # e.g. EDSDK on the R50 V: no movie properties
+    assert win.movie_note.isVisibleTo(win)
+    win.load_settings()
+    spin(app, 0.3)
+    assert not win.movie_note.isVisibleTo(win)  # the mock camera has them

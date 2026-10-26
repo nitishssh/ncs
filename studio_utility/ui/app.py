@@ -184,7 +184,14 @@ class MainWindow(QMainWindow):
         self.boxes: dict[str, QComboBox] = {}
         self.captions: dict[str, QLabel] = {}
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.settings_grid(MOVIE), "Movie")
+        movie = self.settings_grid(MOVIE)
+        self.movie_note = QLabel("This camera doesn't offer its movie settings over this connection (the R50 V "
+                                 "doesn't over USB): set size, format and AF on the camera, or connect over Wi-Fi.")
+        self.movie_note.setObjectName("cap")
+        self.movie_note.setWordWrap(True)
+        self.movie_note.hide()
+        movie.layout().addWidget(self.movie_note, 2, 0, 1, len(MOVIE))
+        self.tabs.addTab(movie, "Movie")
         self.tabs.addTab(self.settings_grid(PHOTO), "Photo")
         color = self.settings_grid(COLOR)
         self.lut = None
@@ -596,6 +603,7 @@ class MainWindow(QMainWindow):
                 box.setEnabled(False)
                 box.setToolTip("Locked in the camera's current shooting mode (use P, Tv, Av or M)" if error == "locked"
                                else "Not available on this camera or connection")
+        self.movie_note.setVisible(all(settings.get(k, (None,))[0] is None for k in MOVIE))
         for k in USB + CAMERA_AUDIO:  # each link offers a different subset: hide what this one lacks
             there = settings.get(k, (None,))[0] is not None
             self.boxes[k].setVisible(there)
