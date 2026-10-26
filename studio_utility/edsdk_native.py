@@ -23,6 +23,11 @@ FUNC = ctypes.WINFUNCTYPE if WIN else ctypes.CFUNCTYPE   # EDSDK callbacks are s
 # EdsDataType values we decode; everything else comes back as raw bytes
 T_BOOL, T_STRING, T_INT32, T_UINT32 = 1, 2, 8, 9
 
+# One load per DLL path for the whole process. The hub builds a new Sdk on every reconnect attempt, and each
+# os.add_dll_directory() stays registered until closed: after hours of retries Windows refused the search
+# path with WinError 206 ("filename or extension is too long").
+_LOADED: dict[str, ctypes.CDLL] = {}
+
 
 class EdsError(RuntimeError):
     def __init__(self, what: str, code: int):
@@ -66,15 +71,22 @@ def find_library() -> Path | None:
     return None
 
 
+def _load(path: Path) -> ctypes.CDLL:
+    key = str(path)
+    if key not in _LOADED:
+        if WIN:
+            os.add_dll_directory(str(path.parent))  # EdsImage.dll lives next to EDSDK.dll
+        _LOADED[key] = (ctypes.WinDLL if WIN else ctypes.CDLL)(key)
+    return _LOADED[key]
+
+
 class Sdk:
     def __init__(self, path: Path | str | None = None):
         path = Path(path) if path else find_library()
         if not path or not path.exists():
             raise FileNotFoundError("Canon EDSDK not found: put it in vendor/EDSDK/ or set STUDIO_UTILITY_EDSDK "
                                     "(see docs/EDSDK_TODO.md)")
-        if WIN:
-            os.add_dll_directory(str(path.parent))  # EdsImage.dll lives next to EDSDK.dll
-        self.lib = (ctypes.WinDLL if WIN else ctypes.CDLL)(str(path))
+        self.lib = _load(path)
         self.path = path
         self._keep = []  # callback objects must outlive the SDK's references to them
         self._declare()
