@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import httpx
 import pytest
@@ -83,8 +83,9 @@ def test_not_installed_when_running_from_source():
 
 
 def test_helper_scripts_wait_for_the_app_then_relaunch(tmp_path):
-    mac = updater.mac_script(tmp_path / "u.dmg", Path("/Applications/Studio Utility.app"), 4242)
+    # each helper's own path style, whichever OS runs the tests (Path("/Applications") prints with \ on Windows)
+    mac = updater.mac_script(PurePosixPath("/tmp/u.dmg"), PurePosixPath("/Applications/Studio Utility.app"), 4242)
     assert "kill -0 4242" in mac and '/usr/bin/open "/Applications/Studio Utility.app"' in mac
-    win = updater.windows_script(tmp_path / "new", Path(r"C:\Users\x\AppData\Local\Programs\Studio Utility"), 4242)
+    win = updater.windows_script(PureWindowsPath(r"C:\t\new"), PureWindowsPath(r"C:\Users\x\AppData\Local\Programs\Studio Utility"), 4242)
     assert "Wait-Process -Id 4242" in win and "robocopy" in win and "studio-utility.exe" in win
     assert "| find" not in win  # hung forever in a console-less cmd
