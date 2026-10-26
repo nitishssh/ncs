@@ -59,6 +59,7 @@ public class HubActivity extends AppCompatActivity {
     @SuppressLint("SetJavaScriptEnabled")
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
+        Updates.check(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);  // framing a shot: don't sleep
         hub = new Hub(this);
         if (!hub.paired()) {

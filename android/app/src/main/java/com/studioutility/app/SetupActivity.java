@@ -57,6 +57,7 @@ public class SetupActivity extends AppCompatActivity {
             return;
         }
         showWelcome();
+        Updates.check(this);
     }
 
     @Override protected void onDestroy() {
