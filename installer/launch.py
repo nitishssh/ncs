@@ -98,6 +98,7 @@ def update_now() -> int:
 
     from studio_utility import __version__, updater
     location = updater.installed_location()
+    updater.note(f"--update-now from {__version__}, installed at {location}, checking {updater.LATEST}")
     if not location:
         print("This copy can't update itself (not an installed app)")
         return 2
@@ -105,8 +106,12 @@ def update_now() -> int:
     if not rel:
         print(f"Studio Utility {__version__} is up to date")
         return 0
-    package = updater.download(rel, Path(tempfile.mkdtemp(prefix="studio-utility-download-")))
-    updater.install_and_restart(package, location)
+    try:
+        package = updater.download(rel, Path(tempfile.mkdtemp(prefix="studio-utility-download-")))
+        updater.install_and_restart(package, location)
+    except Exception as e:
+        updater.note(f"failed: {type(e).__name__}: {e}")
+        raise
     print(f"Updating {location} to {rel.version}; it restarts by itself")
     return 0
 

@@ -18,6 +18,18 @@ from typing import Callable
 import httpx
 
 from studio_utility import __version__
+from studio_utility.paths import CONFIG_DIR
+
+LOG = CONFIG_DIR / "logs" / "update.log"  # written by the app and by the helper that swaps it
+
+
+def note(line: str) -> None:
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG, "a", encoding="utf-8") as f:
+            f.write(f"{__import__('time').strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+    except OSError:
+        pass
 
 REPO = "nitishssh/ncs"
 # STUDIO_UTILITY_UPDATE_URL: a test server that answers like the GitHub API (end-to-end update tests)
@@ -137,6 +149,8 @@ def installed_location() -> Path | None:
 def mac_script(dmg: Path, app: Path, pid: int) -> str:
     return f"""#!/bin/sh
 # Studio Utility update: wait for the app to quit, swap in the new bundle, start it again
+exec >>"{LOG}" 2>&1
+echo "$(date '+%F %T') helper: waiting for {pid}"
 while kill -0 {pid} 2>/dev/null; do sleep 0.5; done
 mnt=$(mktemp -d)
 hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "{dmg}" || exit 1
@@ -147,17 +161,22 @@ fi
 hdiutil detach -quiet "$mnt"
 /usr/bin/xattr -dr com.apple.quarantine "{app}" 2>/dev/null
 /usr/bin/open "{app}"
+echo "$(date '+%F %T') helper: done"
 """
 
 
 def windows_script(unpacked: Path, folder: Path, pid: int) -> str:
+    """PowerShell, not a .cmd: a console-less cmd hung forever in `tasklist | find` while waiting (found
+    2026-10-26), so the swap never happened. Wait-Process needs no pipe and no console."""
     exe = folder / "studio-utility.exe"
-    return f"""@echo off
-rem Studio Utility update: wait for the app to quit, copy the new files over, start it again
-:wait
-tasklist /FI "PID eq {pid}" | find "{pid}" >nul && (timeout /t 1 /nobreak >nul & goto wait)
-robocopy "{unpacked}" "{folder}" /MIR /R:5 /W:1 /NFL /NDL /NJH /NJS >nul
-start "" "{exe}"
+    return f"""# Studio Utility update: wait for the app to quit, copy the new files over, start it again
+function Note($m) {{ Add-Content -LiteralPath '{LOG}' -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' helper: ' + $m) }}
+Note 'waiting for {pid}'
+Wait-Process -Id {pid} -Timeout 300 -ErrorAction SilentlyContinue
+& robocopy '{unpacked}' '{folder}' /MIR /R:10 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+Note "robocopy exit $LASTEXITCODE"
+Start-Process -FilePath '{exe}'
+Note 'done'
 """
 
 
@@ -165,6 +184,7 @@ def install_and_restart(package: Path, location: Path) -> None:
     """Start the helper that replaces `location` once this process exits. The caller then quits the app."""
     work = Path(tempfile.mkdtemp(prefix="studio-utility-update-"))
     pid = os.getpid()
+    note(f"installing {package.name} over {location} (pid {pid}), helper in {work}")
     if sys.platform == "darwin":
         script = work / "update.sh"
         script.write_text(mac_script(package, location, pid))
@@ -176,9 +196,13 @@ def install_and_restart(package: Path, location: Path) -> None:
         unpacked = next((p.parent for p in (work / "new").rglob("studio-utility.exe")), None)
         if not unpacked:
             raise RuntimeError("the update has no studio-utility.exe")
-        script = work / "update.cmd"
-        script.write_text(windows_script(unpacked, location, pid))
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
-        subprocess.Popen(["cmd", "/c", str(script)], creationflags=flags, close_fds=True)
+        script = work / "update.ps1"
+        script.write_text(windows_script(unpacked, location, pid), encoding="utf-8-sig")
+        # a hidden console, not DETACHED_PROCESS: PowerShell started with no console at all exits at once
+        flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+        helper = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                                   "-File", str(script)], creationflags=flags, close_fds=True,
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        note(f"helper started, pid {helper.pid}")
     else:
         raise RuntimeError("updates are only installed on macOS and Windows")
