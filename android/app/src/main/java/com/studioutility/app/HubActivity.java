@@ -116,6 +116,7 @@ public class HubActivity extends AppCompatActivity {
 
     @Override protected void onResume() {
         super.onResume();
+        Updates.check(this);  // onResume: also after the user comes back from allowing installs
         if (web != null && base == null) connect();
     }
 

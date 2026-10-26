@@ -91,8 +91,35 @@ def self_test() -> int:
     return 1 if any("FAILED" in r for _, r in checks) else 0
 
 
+def update_now() -> int:
+    """`studio-utility --update-now`: install the newest release without the dialog (scripts, update tests)."""
+    import tempfile
+    from pathlib import Path
+
+    from studio_utility import __version__, updater
+    location = updater.installed_location()
+    updater.note(f"--update-now from {__version__}, installed at {location}, checking {updater.LATEST}")
+    if not location:
+        print("This copy can't update itself (not an installed app)")
+        return 2
+    rel = updater.check()
+    if not rel:
+        print(f"Studio Utility {__version__} is up to date")
+        return 0
+    try:
+        package = updater.download(rel, Path(tempfile.mkdtemp(prefix="studio-utility-download-")))
+        updater.install_and_restart(package, location)
+    except Exception as e:
+        updater.note(f"failed: {type(e).__name__}: {e}")
+        raise
+    print(f"Updating {location} to {rel.version}; it restarts by itself")
+    return 0
+
+
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
+    if "--update-now" in sys.argv:
+        sys.exit(update_now())
     from studio_utility.ui.app import run
     run()

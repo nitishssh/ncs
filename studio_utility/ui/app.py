@@ -29,6 +29,7 @@ from studio_utility.ui.audio_tab import AudioTab
 from studio_utility.ui.workers import CameraExecutor
 from studio_utility.ui.connection import ConnectionDialog
 from studio_utility.ui import onboarding
+from studio_utility.ui.update import Updater
 
 log = logging.getLogger(__name__)
 
@@ -275,6 +276,7 @@ class MainWindow(QMainWindow):
         self.set_connected(False)
         # Remember the last connection and reconnect to it on launch
         self.prefs = QSettings(*PREFS)
+        self.updater = Updater(self, self.prefs)
         self._want, self._attempts = None, 0
         self.retry = QTimer(self)
         self.retry.timeout.connect(self.try_reconnect)
@@ -371,6 +373,8 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction("Guided setup…", self.run_onboarding)
         menu.addAction("Advanced connection settings…", self.open_advanced_setup)
+        menu.addSeparator()
+        menu.addAction("Check for updates…", lambda: self.updater.check(manual=True))
         menu.exec(self.setup_btn.mapToGlobal(self.setup_btn.rect().bottomLeft()))
 
     def open_advanced_setup(self):
@@ -868,6 +872,7 @@ def run():
     win.resize(780, 720)
     win.show()
     QTimer.singleShot(300, lambda: win.run_onboarding(force=False))  # first launch only
+    QTimer.singleShot(5000, win.updater.check)  # quietly: only says something when there's a new version
     sys.exit(finish(app, win, app.exec()))
 
 
