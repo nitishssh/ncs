@@ -52,8 +52,11 @@ def _run(cmd: list[str], **kw):
 def audio(clip: Path, codec: str = "eac3", out: Path | None = None) -> Path:
     """Re-encode every audio track to AC-3 / E-AC-3; video and track titles copied as they are."""
     name, rate = AUDIO_CODECS[codec]
+    streams = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(clip)], capture_output=True, text=True).stderr
+    if "Audio:" not in streams:  # otherwise ffmpeg happily writes a video-only copy with no Dolby audio
+        raise RuntimeError(f"{clip.name} has no audio track to encode as {name}")
     out = out or clip.with_name(f"{clip.stem}_{codec}.mp4")
-    _run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(clip), "-map", "0:v:0", "-map", "0:a?",
+    _run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(clip), "-map", "0:v:0", "-map", "0:a",
           "-c:v", "copy", "-c:a", codec, "-b:a", rate, "-ar", "48000", "-map_metadata", "0",
           "-movflags", "+faststart", str(out)])
     return out

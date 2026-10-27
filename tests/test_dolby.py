@@ -36,6 +36,15 @@ def test_audio_copies_video_and_encodes_dolby(tmp_path, codec):
     assert f"Audio: {codec}" in info(out) and "Video: hevc" in info(out)
 
 
+def test_audio_refuses_clip_without_audio(tmp_path):
+    silent = tmp_path / "silent.mp4"
+    subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
+                    "-t", "1", "-c:v", "libx264", str(silent)], check=True)
+    with pytest.raises(RuntimeError, match="no audio track"):
+        dolby.audio(silent, "eac3")
+    assert not (tmp_path / "silent_eac3.mp4").exists()
+
+
 def test_rpu_config_covers_every_frame():
     cfg = dolby.rpu_config(120)
     assert cfg["length"] == 120 and cfg["profile"] == "8.1"
