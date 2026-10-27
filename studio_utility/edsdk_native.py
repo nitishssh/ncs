@@ -58,7 +58,8 @@ def find_library() -> Path | None:
     """STUDIO_UTILITY_EDSDK, then vendor/EDSDK (as unpacked from Canon's zip), then next to the app."""
     env = os.environ.get("STUDIO_UTILITY_EDSDK") or os.environ.get("CAMCTL_EDSDK")
     if env:
-        return Path(env)
+        p = Path(env)
+        return p / "EDSDK" if p.suffix == ".framework" else p  # the bundle folder itself won't dlopen
     pattern = "**/EDSDK.dll" if WIN else "**/EDSDK.framework/EDSDK"
     bases = [ROOT / "vendor" / "EDSDK", ROOT / "vendor", Path.cwd() / "vendor",  # any layout scp/unzip left
              Path(sys.executable).parent / "EDSDK", Path.home() / ".studio-utility" / "EDSDK",  # installed apps

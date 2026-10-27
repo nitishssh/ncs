@@ -28,6 +28,7 @@ QPushButton#primary { background:#e8e8e8; color:#111; font-weight:600; }
 """
 
 CHOICES = [  # key, title, what it means
+    ("auto", "This computer", "Camera plugged in here by USB. No address or pairing; uses the hub on this computer if it has the camera."),
     ("hub", "Studio Hub", "Share the camera with your phone, Mac and PC. Best when the camera stays on one computer."),
     ("usb-edsdk", "USB cable", "Plug the camera into this computer. Most controls, fastest file transfer."),
     ("usb-gphoto", "USB cable (open-source driver)", "USB without Canon's SDK. Mac only; fewer controls."),
@@ -202,12 +203,12 @@ class Onboarding(QDialog):
                                                "Enter the camera's address, or the relay's.")
             field = f.relay or setup_checks.DEFAULT_RELAY
             checks = [_ok(bool(f.relay), f"{f.relay} answers", "Address not answering yet")]
-        elif k in ("usb-edsdk", "usb-gphoto"):
+        elif k in ("auto", "usb-edsdk", "usb-gphoto"):
             title = "Camera on USB"
             sub = ("Use a data cable, set the camera's USB connection app to Photo Import/Remote Control, and turn its "
                    "Wi-Fi off — the camera won't do both.")
             driver = (_ok(bool(f.edsdk), "Canon SDK installed", "Canon SDK missing: put it in vendor/EDSDK (see docs)")
-                      if k == "usb-edsdk" else _ok(f.gphoto, "gphoto2 installed", "pip install gphoto2"))
+                      if k != "usb-gphoto" else _ok(f.gphoto, "gphoto2 installed", "pip install gphoto2"))
             checks = [_ok(bool(f.usb_camera), f"{f.usb_camera or 'Camera'} detected on USB",
                           "No Canon on USB yet: cable in, camera on"), driver,
                       "•  Close EOS Utility (and Photos / Image Capture on a Mac)"]

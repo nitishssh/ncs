@@ -221,6 +221,12 @@ def test_missing_sdk_says_what_to_do(tmp_path, monkeypatch):
         t.connect()
 
 
+def test_env_may_point_at_the_framework_folder(monkeypatch):
+    from studio_utility import edsdk_native
+    monkeypatch.setenv("STUDIO_UTILITY_EDSDK", "/x/EDSDK.framework")
+    assert edsdk_native.find_library() == edsdk_native.Path("/x/EDSDK.framework/EDSDK")
+
+
 def test_hub_prefers_usb_and_falls_back(monkeypatch, tmp_path):
     from studio_utility.hub import server
     monkeypatch.setattr(server, "CONFIG", tmp_path / "hub.json")

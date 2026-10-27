@@ -49,7 +49,7 @@ LABELS = {"exposure": "Exp. comp", "af_method": "AF method", "mode": "Mode", "tv
           "clip_prefix": "Clip prefix", "clip_name": "Clip name",
           "sound_recording": "Sound rec.", "sound_level": "Rec. level", "wind_filter": "Wind filter",
           "attenuator": "Attenuator"}
-DEFAULT_ARG = {"hub": "", "mock": "", "wifi": "10.11.0.2:8090", "ble": "", "usb-edsdk": "", "usb-gphoto": "", "video": "0"}
+DEFAULT_ARG = {"auto": "", "hub": "", "mock": "", "wifi": "10.11.0.2:8090", "ble": "", "usb-edsdk": "", "usb-gphoto": "", "video": "0"}
 
 STYLE = """
 QWidget { background:#121212; color:#e8e8e8; font-size:13px; }
@@ -425,7 +425,8 @@ class MainWindow(QMainWindow):
 
         def bootstrap():
             transport = transports.load(kind, **kwargs)
-            transport.connect()
+            if kind != "auto":  # auto hands back a transport it already connected
+                transport.connect()
             caps = transport.capabilities()
             try:
                 model = transport.info().model
