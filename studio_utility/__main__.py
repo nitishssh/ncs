@@ -20,6 +20,10 @@ def main():
     u.add_argument("--json", action="store_true")
     b = sub.add_parser("ble-scan")
     b.add_argument("--services", action="store_true", help="connect to first camera and dump GATT")
+    x = sub.add_parser("dolby", help="export clips as Dolby Vision 8.1 video or Dolby Digital (Plus) audio")
+    x.add_argument("kind", choices=["vision", "eac3", "ac3"])
+    x.add_argument("clips", nargs="+")
+    x.add_argument("--allow-sdr", action="store_true", help="Dolby Vision from a clip not tagged HDR PQ")
     a = p.parse_args()
 
     from studio_utility import transports
@@ -57,6 +61,15 @@ def main():
                 ro = " (read-only)" if p.get("readonly") else ""
                 print(f"{p['id']:42} {str(p['name'])[:28]:28} options={p['options']:<3} value={p['value']}{ro}")
         print(f"{len(found)} properties. Paste this output back so the remote controls can be extended.")
+    elif a.cmd == "dolby":
+        from pathlib import Path
+        from studio_utility import dolby
+        for clip in map(Path, a.clips):
+            try:
+                out = dolby.vision(clip, allow_sdr=a.allow_sdr) if a.kind == "vision" else dolby.audio(clip, a.kind)
+                print(out)
+            except RuntimeError as e:
+                print(f"{clip.name}: {e}")
     elif a.cmd == "ble-scan":
         from studio_utility.transports.ble import BLETransport
         found = BLETransport.scan()
