@@ -24,6 +24,15 @@ for pkg in ("imageio_ffmpeg", "pedalboard", "noisereduce", "zeroconf", "soundfil
     binaries += b
     hidden += h
 
+# gphoto2 wheels keep libgphoto2/libusb and their dependencies in a hidden
+# `.dylibs` directory. PyInstaller's collect_all gathers the Python package
+# but does not reliably collect this dot-directory, which makes the packaged
+# fallback fail with "Error loading a library" on macOS.
+if sys.platform == "darwin":
+    import glob
+    for dylib in glob.glob(sys.prefix + "/lib/python*/site-packages/gphoto2/.dylibs/*.dylib"):
+        binaries.append((dylib, "gphoto2/.dylibs"))
+
 icon = root + ("/installer/icon.icns" if sys.platform == "darwin" else "/installer/icon.ico")
 a = Analysis([root + "/installer/launch.py"], pathex=[root], hiddenimports=hidden, excludes=excludes,
              datas=datas, binaries=binaries)
@@ -34,7 +43,7 @@ coll = COLLECT(exe, a.binaries, a.datas, name="studio-utility")
 
 if sys.platform == "darwin":
     app = BUNDLE(coll, name="Studio Utility.app", bundle_identifier="com.studio-utility.app", icon=icon, info_plist={
-        "CFBundleShortVersionString": "0.3.0",
+        "CFBundleShortVersionString": "0.4.0",
         "NSHighResolutionCapable": True,
         # Reaching the camera relay on the Thunderbolt network needs macOS local-network permission
         "NSLocalNetworkUsageDescription": "Studio Utility connects to your Canon camera on the local network.",

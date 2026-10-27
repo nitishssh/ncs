@@ -9,10 +9,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QIcon, QImage, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu,
                                QProgressBar, QPushButton, QVBoxLayout, QWidget)
 
-from studio_utility import sync
+from studio_utility import dolby, sync
 from studio_utility.core import Cancelled
 from studio_utility.imports import ImportJournal
 
@@ -94,6 +94,7 @@ class Downloader(QThread):
 class FilesPanel(QWidget):
     message = Signal(str)
     synced = Signal(str)  # voice-sync results, emitted from the worker thread
+    exported = Signal(str)  # Dolby export results, emitted from the worker thread
 
     def __init__(self):
         super().__init__()
@@ -105,6 +106,7 @@ class FilesPanel(QWidget):
         self.items: dict[str, QListWidgetItem] = {}
         self._got_movie = False
         self.synced.connect(self._sync_finished)
+        self.exported.connect(self._export_finished)
 
         self.grid = QListWidget()
         self.grid.setViewMode(QListWidget.IconMode)
@@ -151,6 +153,14 @@ class FilesPanel(QWidget):
         self.auto_sync.setToolTip("After movies download, merge the matching mic recording into <clip>_final.mp4")
         self.auto_sync.setChecked(True)
         self._sync_running = False
+        self.dolby_btn = QPushButton("Dolby ▾")
+        self.dolby_btn.setToolTip("Export downloaded clips as Dolby Vision video or Dolby Digital audio")
+        menu = QMenu(self.dolby_btn)
+        menu.addAction("Dolby Vision 8.1 video (HDR PQ clips)…", lambda: self.export_dolby("vision"))
+        menu.addAction("Dolby Digital Plus audio (E-AC-3)…", lambda: self.export_dolby("eac3"))
+        menu.addAction("Dolby Digital audio (AC-3)…", lambda: self.export_dolby("ac3"))
+        self.dolby_btn.setMenu(menu)
+        self._export_running = False
         self.import_btn = QPushButton("Import new")
         self.import_btn.setToolTip("Download every file on the card that isn't in the download folder yet")
         self.import_btn.clicked.connect(self.import_new)
@@ -159,7 +169,7 @@ class FilesPanel(QWidget):
         self.resume_btn.clicked.connect(self.resume_interrupted)
         self.resume_btn.setVisible(False)
         for w in (self.refresh_btn, self.import_btn, self.get_btn, self.auto, self.jpeg_only, self.sync_btn,
-                  self.auto_sync, self.resume_btn):
+                  self.auto_sync, self.dolby_btn, self.resume_btn):
             tools.addWidget(w)
         tools.addStretch()
         tools.addWidget(self.folder_btn)
@@ -374,6 +384,38 @@ class FilesPanel(QWidget):
     def _sync_finished(self, msg: str):
         self._sync_running = False
         self.sync_btn.setEnabled(True)
+        self.message.emit(msg)
+
+    def export_dolby(self, kind: str):
+        """Pick downloaded clips and write <clip>_dv.mp4 / _eac3.mp4 / _ac3.mp4 next to them, in the background."""
+        if self._export_running:
+            return
+        if kind == "vision" and (missing := dolby.missing_tools()):
+            self.message.emit(f"Dolby Vision needs {', '.join(missing)}: brew install x265 dovi_tool gpac")
+            return
+        start = self.dest() if self.dest().exists() else self.root
+        paths, _ = QFileDialog.getOpenFileNames(self, "Clips to export", str(start), "Movies (*.mp4 *.mov *.MP4 *.MOV)")
+        if not paths:
+            return
+        self._export_running = True
+        self.dolby_btn.setEnabled(False)
+        what = "Dolby Vision" if kind == "vision" else dolby.AUDIO_CODECS[kind][0]
+        self.message.emit(f"Exporting {len(paths)} clip(s) as {what}…")
+
+        def work():
+            parts = []
+            for p in map(Path, paths):
+                try:
+                    out = dolby.vision(p) if kind == "vision" else dolby.audio(p, kind)
+                    parts.append(out.name)
+                except Exception as e:
+                    parts.append(f"{p.name}: {e}")
+            self.exported.emit(f"{what}: " + "; ".join(parts))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _export_finished(self, msg: str):
+        self._export_running = False
+        self.dolby_btn.setEnabled(True)
         self.message.emit(msg)
 
     def on_done(self, remote: str, local: str):

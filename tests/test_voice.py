@@ -75,6 +75,7 @@ def test_settings_and_profile_roundtrip(tmp_path, monkeypatch):
     assert round(voice.noise_floor_db(noise)) == -40
 
 
+@pytest.mark.skipif(audio.sd is None, reason="sounddevice/PortAudio not available")
 def test_output_route_drops_old_blocks(monkeypatch):
     class FakeOut:
         def __init__(self, **kw): pass

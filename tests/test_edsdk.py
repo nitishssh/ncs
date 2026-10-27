@@ -221,10 +221,13 @@ def test_missing_sdk_says_what_to_do(tmp_path, monkeypatch):
         t.connect()
 
 
-def test_env_may_point_at_the_framework_folder(monkeypatch):
+def test_env_may_point_at_the_framework_folder(monkeypatch, tmp_path):
     from studio_utility import edsdk_native
-    monkeypatch.setenv("STUDIO_UTILITY_EDSDK", "/x/EDSDK.framework")
-    assert edsdk_native.find_library() == edsdk_native.Path("/x/EDSDK.framework/EDSDK")
+    lib = tmp_path / "EDSDK.framework" / "EDSDK"
+    lib.parent.mkdir()
+    lib.touch()
+    monkeypatch.setenv("STUDIO_UTILITY_EDSDK", str(lib.parent))
+    assert edsdk_native.find_library() == lib
 
 
 def test_hub_prefers_usb_and_falls_back(monkeypatch, tmp_path):

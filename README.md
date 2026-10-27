@@ -23,6 +23,11 @@ python3 -m venv .venv && .venv/bin/pip install -e .
 - **Bluetooth:** the UUIDs in `ble.py` come from community reverse-engineering and are not verified. Run `studio-utility ble-scan --services` and adjust them to match your camera.
 - **Video:** set the camera to USB streaming (UVC) or use an HDMI capture dongle. The field takes the device index (0, 1, …).
 
+## Dolby exports
+Files panel → **Dolby ▾**, or `studio-utility dolby vision|eac3|ac3 CLIP...`. Each export is written next to the original clip.
+- **Dolby Vision 8.1** (`<clip>_dv.mp4`): shoot with **HDR PQ** on (Canon Log 3 and SDR need grading first). Needs `brew install x265 dovi_tool gpac`. The picture is re-encoded, which is slow.
+- **Dolby Digital Plus / Dolby Digital** (`<clip>_eac3.mp4`, `<clip>_ac3.mp4`): the video is copied untouched and the audio is re-encoded. Needs only ffmpeg.
+
 ## Packaging
 Use PyInstaller to build `Studio Utility.app` on macOS and `studio-utility.exe` on Windows.
 

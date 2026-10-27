@@ -10,6 +10,7 @@ presets and the web app work unchanged; anything unrecognised passes through as 
 from __future__ import annotations
 
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -77,8 +78,36 @@ def from_raw(key: str, raw: str, choices: list[str]) -> str:
     raise ValueError(f"{raw!r} is not an option for {key} (camera offers {choices})")
 
 
+_dylibs_loaded = False
+
+
+def _preload_bundled_dylibs():
+    """PyInstaller renames the gphoto2 wheel's hidden `.dylibs` to `__dot__dylibs`, and the SWIG extension's
+    @rpath doesn't resolve from the bundle. Load the libraries by absolute path (RTLD_GLOBAL) once, before
+    `import gphoto2`, or the packaged app reports "Error loading a library"."""
+    global _dylibs_loaded
+    if _dylibs_loaded or sys.platform != "darwin":
+        return
+    _dylibs_loaded = True
+    import ctypes
+    exe = Path(sys.executable).parent
+    roots = [Path(sys._MEIPASS)] if hasattr(sys, "_MEIPASS") else []
+    for dylibs in (r / "gphoto2" / n for r in roots + [exe, exe.parent] for n in ("__dot__dylibs", ".dylibs")):
+        if not dylibs.is_dir():
+            continue
+        core = {"libgphoto2.6.dylib", "libgphoto2_port.12.dylib"}
+        libs = sorted(dylibs.glob("*.dylib"), key=lambda p: p.name in core)  # dependencies before the core
+        for lib in libs:
+            try:
+                ctypes.CDLL(str(lib), mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                pass  # optional codecs with missing dependencies; the camera driver doesn't need them
+        return
+
+
 def _canon_camera():
     """The Canon on USB, never another PTP device (phones show up too)."""
+    _preload_bundled_dylibs()
     import gphoto2 as gp
     found = [(n, a) for n, a in gp.Camera.autodetect() if "canon" in n.lower()]
     if not found:
