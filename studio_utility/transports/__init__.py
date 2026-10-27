@@ -2,6 +2,7 @@
 from importlib import import_module
 
 REGISTRY = {
+    "auto": ("studio_utility.transports.auto", "connect"),  # returns an already-connected transport
     "hub": ("studio_utility.transports.hub", "HubTransport"),
     "mock": ("studio_utility.transports.mock", "MockTransport"),
     "wifi": ("studio_utility.transports.ccapi", "CCAPITransport"),

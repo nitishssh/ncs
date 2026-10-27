@@ -4,6 +4,7 @@ the hub owns the camera connection; this transport speaks the hub's HTTP API.
 Address: the pairing link from the hub (http://<hub>:8765/?token=...), as shown under the QR code."""
 from __future__ import annotations
 
+import json
 import socket
 import time
 from pathlib import Path
@@ -14,14 +15,30 @@ import httpx
 from studio_utility.core import Cancelled, CameraInfo, NotSupported, Transport
 
 
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def local_token() -> str:
+    """The hub's own secret from this Mac's hub.json: a hub on the same computer needs no pairing link."""
+    from studio_utility.paths import CONFIG_DIR
+    try:
+        return json.loads((CONFIG_DIR / "hub.json").read_text()).get("token", "")
+    except (OSError, ValueError):
+        return ""
+
+
 def parse_link(link: str) -> tuple[str, str]:
-    """'http://10.63.196.242:8765/?token=abc' -> ('http://10.63.196.242:8765', 'abc')."""
+    """'http://10.63.196.242:8765/?token=abc' -> ('http://10.63.196.242:8765', 'abc').
+    Empty or token-less 'localhost' -> the hub on this computer, with its token read from disk."""
     if "://" not in link:
-        link = "http://" + link
+        link = "http://" + (link or "localhost")
     u = urlparse(link)
     token = (parse_qs(u.query).get("token") or [""])[0] or u.fragment
+    host = u.hostname or "localhost"
+    if not token and host in LOCAL_HOSTS:
+        token = local_token()
     port = u.port or 8765
-    return f"{u.scheme}://{u.hostname}:{port}", token
+    return f"{u.scheme}://{host}:{port}", token
 
 
 def discover(timeout: float = 2.0) -> list[str]:

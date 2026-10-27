@@ -8,7 +8,8 @@ from studio_utility import setup_checks
 from studio_utility.diagnostics import write_support_report
 
 KINDS = {
-    "hub": ("Studio Hub (recommended)", "Paste the pairing link shown by the computer running Studio Hub."),
+    "auto": ("This computer (recommended)", "Plug the camera in by USB. Uses the hub on this computer if it already has the camera."),
+    "hub": ("Studio Hub", "Paste the pairing link from the hub's QR page. Not needed for a hub on this computer."),
     "wifi": ("Camera Control API", "Enter the camera or relay address, for example 10.11.0.2:8090."),
     "usb-edsdk": ("Canon USB (EDSDK)", "Connect USB, close Canon EOS Utility, and install Canon EDSDK."),
     "usb-gphoto": ("USB fallback (gPhoto2)", "Connect USB and close macOS Photos or PTPCamera."),

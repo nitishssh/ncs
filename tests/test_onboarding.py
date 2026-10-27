@@ -7,8 +7,9 @@ from studio_utility.setup_checks import DEFAULT_RELAY, Found
 
 
 @pytest.mark.parametrize("found,expected", [
-    (Found(hubs=["http://10.11.0.2:8765/"], usb_camera="Canon camera", edsdk="x"), "hub"),
-    (Found(usb_camera="Canon camera", edsdk="/sdk/EDSDK"), "usb-edsdk"),
+    (Found(hubs=["http://10.11.0.2:8765/"], usb_camera="Canon camera", edsdk="x"), "auto"),  # camera is here
+    (Found(hubs=["http://10.11.0.2:8765/"]), "hub"),
+    (Found(usb_camera="Canon camera", edsdk="/sdk/EDSDK"), "auto"),
     (Found(usb_camera="Canon camera", gphoto=True), "usb-gphoto"),
     (Found(usb_camera="Canon camera"), "mock"),  # camera but no driver: nothing would work yet
     (Found(relay=DEFAULT_RELAY), "wifi"),
@@ -42,13 +43,13 @@ def test_wizard_usb_path(qapp):
     dlg = Onboarding(detect=lambda: Found(usb_camera="Canon EOS R50 V", edsdk="/sdk/EDSDK"))
     dlg.forward()  # welcome -> choose (starts detection)
     _settle(qapp, dlg, lambda: dlg.found is not None)
-    assert dlg.radios["usb-edsdk"].isChecked()
+    assert dlg.radios["auto"].isChecked()
     dlg.forward()  # -> details
     assert "Canon EOS R50 V detected on USB" in dlg.checks.text() and "Canon SDK installed" in dlg.checks.text()
     assert not dlg.field.isVisibleTo(dlg)
     dlg.forward()  # -> phone
     dlg.forward()  # finish
-    assert dlg.result() and dlg.selected() == ("usb-edsdk", "")
+    assert dlg.result() and dlg.selected() == ("auto", "")
 
 
 def test_wizard_hub_path_keeps_typed_link(qapp):

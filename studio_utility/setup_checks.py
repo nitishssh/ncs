@@ -20,10 +20,12 @@ class Found:
     relay: str | None = None             # camera relay / Camera Control API address that answered
 
     def recommended(self) -> str:
+        if self.usb_camera and self.edsdk:
+            return "auto"  # camera on this computer: direct USB, or the local hub if it holds it - no pairing
         if self.hubs:
             return "hub"
-        if self.usb_camera and (self.edsdk or self.gphoto):
-            return "usb-edsdk" if self.edsdk else "usb-gphoto"
+        if self.usb_camera and self.gphoto:
+            return "usb-gphoto"
         if self.relay:
             return "wifi"
         return "mock"

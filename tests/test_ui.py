@@ -268,3 +268,25 @@ def test_movie_tab_explains_when_the_link_has_no_movie_settings(win, app):
     win.load_settings()
     spin(app, 0.3)
     assert not win.movie_note.isVisibleTo(win)  # the mock camera has them
+
+
+def test_auto_stays_auto_after_connecting(app, monkeypatch):
+    """auto hands back a hub or EDSDK transport; the saved choice must stay "auto", not that transport's name."""
+    from studio_utility import transports
+    from studio_utility.ui.app import MainWindow
+
+    def fake_auto(**kwargs):
+        t = transports.load("mock")
+        t.connect()
+        t.name = "hub"
+        return t
+
+    real_load = transports.load
+    monkeypatch.setattr(transports, "load", lambda kind, **kw: fake_auto(**kw) if kind == "auto" else real_load(kind, **kw))
+    QSettings(*paths.PREFS).clear()
+    window = MainWindow()
+    window.connect_to("auto", "")
+    spin(app, 0.5)
+    assert window.t is not None
+    assert QSettings(*paths.PREFS).value("last_kind") == "auto"
+    window.close()
