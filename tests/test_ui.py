@@ -150,3 +150,11 @@ def test_builtin_log_preview_lut(win, app):
     assert win.lut_btn.text() == f"LUT: {name}" and not win.preview.pixmap().isNull()
     win.set_lut(None, None)
     assert win.lut_btn.text() == "LUT: off"
+
+
+def test_hiding_usb_settings_keeps_photo_and_movie(win, app):
+    """USB lives in the More tabs: a connection without USB settings hides it there, never Photo/Movie."""
+    win.caps = set(win.caps) - {"focus_drive"}
+    win.apply_settings({})
+    assert [win.tabs.tabText(i) for i in range(win.tabs.count()) if win.tabs.isTabVisible(i)] == ["Photo", "Movie", "More"]
+    assert not win.more_tabs.isTabVisible(win.usb_tab)
