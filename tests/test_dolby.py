@@ -10,6 +10,8 @@ from studio_utility.sync import ffmpeg_exe
 
 
 def clip(folder, pq: bool = True):
+    if "libx265" not in subprocess.run([ffmpeg_exe(), "-hide_banner", "-encoders"], capture_output=True, text=True).stdout:
+        pytest.skip("this ffmpeg has no libx265 to make HDR test clips")
     out = folder / ("pq.mp4" if pq else "sdr.mp4")
     tags = ":colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc" if pq else ""
     subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25",
