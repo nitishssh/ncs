@@ -67,6 +67,13 @@ QLabel#pill[alert="true"] { background:#5a1d1d; border-color:#c62828; }
 QTabWidget::pane { border:none; }
 QTabBar::tab { background:transparent; color:#888; padding:6px 14px; border-bottom:2px solid transparent; }
 QTabBar::tab:selected { color:#fff; border-bottom:2px solid #e8e8e8; }
+QTabWidget#modeTabs::pane { background:#171717; border:1px solid #252525; border-radius:10px; }
+QTabWidget#modeTabs QTabBar::tab { padding:7px 18px; }
+QTabWidget#moreTabs { background:#171717; }
+QTabWidget#moreTabs::pane { border:none; }
+QLabel#section { color:#bdbdbd; font-size:11px; letter-spacing:1px; text-transform:uppercase; }
+QPushButton#cameraControls { background:#242424; border-color:#444; border-radius:16px; padding:6px 13px; }
+QPushButton#cameraControls:checked { background:#f1f1f1; color:#111; }
 QSlider::groove:horizontal { height:4px; background:#333; border-radius:2px; }
 QSlider::handle:horizontal { background:#e8e8e8; width:16px; margin:-6px 0; border-radius:8px; }
 QListWidget { background:#1a1a1a; border:1px solid #2a2a2a; border-radius:6px; }
@@ -116,6 +123,7 @@ class MainWindow(QMainWindow):
         self.conn_btn.clicked.connect(self.toggle_connect)
         self.setup_btn = QPushButton("Setup…")
         self.setup_btn.clicked.connect(self.open_connection_setup)
+        self.arg.setVisible(False)
         top = QHBoxLayout()
         top.addWidget(self.kind)
         top.addWidget(self.arg, 1)
@@ -184,6 +192,8 @@ class MainWindow(QMainWindow):
         self.boxes: dict[str, QComboBox] = {}
         self.captions: dict[str, QLabel] = {}
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("modeTabs")
+        self.tabs.addTab(self.settings_grid(PHOTO), "Photo")
         movie = self.settings_grid(MOVIE)
         self.movie_note = QLabel("This camera doesn't offer its movie settings over this connection (the R50 V "
                                  "doesn't over USB): set size, format and AF on the camera, or connect over Wi-Fi.")
@@ -192,7 +202,6 @@ class MainWindow(QMainWindow):
         self.movie_note.hide()
         movie.layout().addWidget(self.movie_note, 2, 0, 1, len(MOVIE))
         self.tabs.addTab(movie, "Movie")
-        self.tabs.addTab(self.settings_grid(PHOTO), "Photo")
         color = self.settings_grid(COLOR)
         self.lut = None
         self.lut_btn = QPushButton("LUT: off")
@@ -206,7 +215,9 @@ class MainWindow(QMainWindow):
         lut_menu.addAction("Off", lambda: self.set_lut(None, None))
         self.lut_btn.setMenu(lut_menu)
         color.layout().addWidget(self.lut_btn, 1, len(COLOR))
-        self.tabs.addTab(color, "Color")
+        self.more_tabs = more = QTabWidget()
+        more.setObjectName("moreTabs")
+        more.addTab(color, "Color")
         usb = self.settings_grid(USB)
         focus_row = QHBoxLayout()
         cap = QLabel("Focus")
@@ -221,11 +232,11 @@ class MainWindow(QMainWindow):
             focus_row.addWidget(b)
         focus_row.addStretch()
         usb.layout().addLayout(focus_row, 2, 0, 1, len(USB))
-        self.usb_tab = self.tabs.addTab(usb, "USB")
+        self.usb_tab = more.addTab(usb, "USB")
         self.tools = ToolsTab(lambda: {k: b.currentData() for k, b in self.boxes.items()
                                        if b.isEnabled() and b.currentData() is not None})
         self.tools.message.connect(self.flash)
-        self.tabs.addTab(self.tools, "Tools")
+        more.addTab(self.tools, "Tools")
         # External mics (DJI Mic, Kreo Sonik…) record WAVs into the same dated folder as imports
         self.audio = AudioTab(lambda: self.files.dest(), camera_settings=self.settings_grid(CAMERA_AUDIO))
         self.audio.message.connect(self.flash)
@@ -233,7 +244,8 @@ class MainWindow(QMainWindow):
         audio_scroll.setWidget(self.audio)
         audio_scroll.setWidgetResizable(True)
         audio_scroll.setFrameShape(QScrollArea.NoFrame)
-        self.tabs.addTab(audio_scroll, "Audio")
+        more.addTab(audio_scroll, "Audio")
+        self.tabs.addTab(more, "More")
 
         # Controls
         self.shutter = QPushButton("Shoot")
@@ -425,7 +437,18 @@ class MainWindow(QMainWindow):
 
         def bootstrap():
             transport = transports.load(kind, **kwargs)
-            transport.connect()
+            try:
+                transport.connect()
+            except Exception as error:
+                # macOS can expose a Canon camera to PTP/libgphoto2 while the
+                # installed EDSDK returns an empty camera list.  Keep the
+                # preferred EDSDK path, but make the USB fallback automatic so
+                # a working camera is not reported as disconnected.
+                if kind != "usb-edsdk" or "no camera on USB" not in str(error):
+                    raise
+                log.warning("EDSDK found no camera; retrying USB with gphoto2")
+                transport = transports.load("usb-gphoto", **kwargs)
+                transport.connect()
             caps = transport.capabilities()
             try:
                 model = transport.info().model
@@ -461,6 +484,13 @@ class MainWindow(QMainWindow):
             return
         self._connecting = False
         self.t = transport
+        # If EDSDK needed the gphoto2 fallback, persist that working transport
+        # for reconnects instead of repeatedly retrying the failing EDSDK path.
+        actual_kind = getattr(transport, "name", kind)
+        if actual_kind != kind:
+            self._want = (actual_kind, arg)
+            self.kind.setCurrentText(actual_kind)
+            kind = actual_kind
         self.prefs.setValue("last_kind", kind)
         self.prefs.setValue("last_arg", arg)
         self.caps = caps
@@ -609,7 +639,7 @@ class MainWindow(QMainWindow):
             self.boxes[k].setVisible(there)
             self.captions[k].setVisible(there)
         usb = any(settings.get(k, (None,))[0] is not None for k in USB) or "focus_drive" in self.caps
-        self.tabs.setTabVisible(self.usb_tab, usb)  # Wi-Fi has none of these
+        self.more_tabs.setTabVisible(self.usb_tab, usb)  # Wi-Fi has none of these
         self.audio.show_camera_settings(any(settings.get(k, (None,))[0] is not None for k in CAMERA_AUDIO))
         self.loading = False
 

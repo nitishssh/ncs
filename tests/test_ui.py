@@ -154,6 +154,14 @@ def test_builtin_log_preview_lut(win, app):
     assert win.lut_btn.text() == "LUT: off"
 
 
+def test_hiding_usb_settings_keeps_photo_and_movie(win, app):
+    """USB lives in the More tabs: a connection without USB settings hides it there, never Photo/Movie."""
+    win.caps = set(win.caps) - {"focus_drive"}
+    win.apply_settings({})
+    assert [win.tabs.tabText(i) for i in range(win.tabs.count()) if win.tabs.isTabVisible(i)] == ["Photo", "Movie", "More"]
+    assert not win.more_tabs.isTabVisible(win.usb_tab)
+
+
 def test_camera_audio_settings_in_audio_tab(win, app):
     assert win.audio.camera_box.isVisibleTo(win.audio)
     box = win.boxes["wind_filter"]
@@ -254,6 +262,7 @@ def test_files_panel_fetches_only_the_first_thumbnails(app, monkeypatch):
 
 
 def test_movie_tab_explains_when_the_link_has_no_movie_settings(win, app):
+    win.tabs.setCurrentIndex(1)  # Photo is the first tab
     win.apply_settings({})  # e.g. EDSDK on the R50 V: no movie properties
     assert win.movie_note.isVisibleTo(win)
     win.load_settings()
