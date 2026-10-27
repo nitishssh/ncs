@@ -1,0 +1,103 @@
+# Build the Windows app and the Android app for a release and attach them to it, next to the Mac DMG.
+# Runs when a release is published, or by hand for an existing tag (Actions → Release builds → Run workflow).
+# Each file gets a line in SHA256SUMS.txt: the app's updater refuses downloads that aren't listed there.
+name: Release builds
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach to (e.g. v0.4.0)
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install locked environment
+        run: |
+          uv venv --python 3.13
+          uv pip install -r requirements.lock
+          uv pip install --no-deps -e .
+          uv pip install pyinstaller
+      - name: Build
+        run: uv run pyinstaller --noconfirm --log-level WARN installer\studio-utility.spec
+      - name: Self-test the bundle
+        shell: pwsh
+        run: |
+          $out = "$env:USERPROFILE\.studio-utility\self_test.txt"
+          Remove-Item $out -ErrorAction SilentlyContinue
+          Start-Process -Wait -FilePath dist\studio-utility\studio-utility.exe -ArgumentList "--self-test"
+          Get-Content $out
+          if (-not (Select-String -Path $out -Pattern "self-test OK" -Quiet) -or (Select-String -Path $out -Pattern "FAILED" -Quiet)) { exit 1 }
+      - name: Zip
+        shell: pwsh
+        run: |
+          $v = "$env:TAG".TrimStart("v")
+          Compress-Archive -Path dist\studio-utility -DestinationPath "StudioUtility-$v-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: StudioUtility-*-windows-x64.zip
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Build
+        working-directory: android
+        # Debug-signed: release signing needs a keystore secret. A phone with an APK signed by another key must
+        # uninstall it once before installing this one.
+        run: gradle --no-daemon assembleDebug
+      - name: Name the APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "StudioUtility-${TAG#v}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: StudioUtility-*.apk
+
+  attach:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Add checksums and attach to the release
+        run: |
+          gh release download "$TAG" --pattern SHA256SUMS.txt || touch SHA256SUMS.txt
+          for f in StudioUtility-*-windows-x64.zip StudioUtility-*.apk; do
+            grep -v "  $f\$" SHA256SUMS.txt > sums.tmp || true
+            sha256sum "$f" >> sums.tmp
+            mv sums.tmp SHA256SUMS.txt
+          done
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" --clobber StudioUtility-*-windows-x64.zip StudioUtility-*.apk SHA256SUMS.txt
