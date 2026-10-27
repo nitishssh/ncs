@@ -7,7 +7,8 @@ import time
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PySide6.QtCore import QSettings  # noqa: E402
+from PySide6.QtCore import QSettings, Qt  # noqa: E402
+from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from studio_utility import paths  # noqa: E402
@@ -290,3 +291,54 @@ def test_auto_stays_auto_after_connecting(app, monkeypatch):
     assert window.t is not None
     assert QSettings(*paths.PREFS).value("last_kind") == "auto"
     window.close()
+
+
+def test_bgr_frames_reach_the_screen_without_color_swap():
+    import numpy as np
+    from studio_utility.ui.app import bgr_image
+    frame = np.zeros((4, 6, 3), np.uint8)
+    frame[:, :] = (255, 0, 0)  # OpenCV blue
+    image = bgr_image(frame)
+    assert (image.width(), image.height()) == (6, 4)
+    assert image.pixelColor(0, 0).blue() == 255 and image.pixelColor(0, 0).red() == 0
+
+
+def test_preview_is_scaled_at_screen_pixel_density(win, app):
+    spin(app, 0.5)
+    pix = win.preview.pixmap()
+    assert pix is not None and not pix.isNull()
+    dpr = win.preview.devicePixelRatioF()
+    assert pix.devicePixelRatio() == dpr
+    size = pix.deviceIndependentSize()
+    # fills the preview in one dimension, at full device resolution
+    assert abs(size.width() - win.preview.width()) <= 1 or abs(size.height() - win.preview.height()) <= 1
+
+
+def test_preview_click_maps_to_image_coordinates(win, app, monkeypatch):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    spin(app, 0.5)
+    got = []
+    win.preview.clicked.connect(lambda x, y: got.append((x, y)))
+    centre = QPointF(win.preview.width() / 2, win.preview.height() / 2)
+    win.preview.mousePressEvent(QMouseEvent(QMouseEvent.MouseButtonPress, centre, centre, Qt.LeftButton,
+                                            Qt.LeftButton, Qt.NoModifier))
+    assert got and abs(got[0][0] - 0.5) < 0.02 and abs(got[0][1] - 0.5) < 0.02
+
+
+def test_full_screen_live_view_opens_gets_frames_and_closes(win, app):
+    spin(app, 0.3)
+    win.full_btn.click()
+    spin(app, 0.5)
+    view = win.full_view
+    assert view is not None and view.isVisible()
+    assert view.pixmap() is not None and not view.pixmap().isNull()
+    view.keyPressEvent(QKeyEvent(QKeyEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+    spin(app, 0.2)
+    assert win.full_view is None
+    win.preview.toggle_full.emit()  # double-click on the preview
+    spin(app, 0.2)
+    assert win.full_view is not None
+    win.toggle_full_view()
+    spin(app, 0.2)
+    assert win.full_view is None
