@@ -330,6 +330,15 @@ class Hub:
             resp.set_cookie("studio_token", device_token, max_age=3600 * 24 * 365, httponly=True, samesite="Lax")
         return resp
 
+    @web.middleware
+    async def bad_input(self, request: web.Request, handler):
+        """Malformed query or JSON (missing field, wrong type, not JSON) is the client's mistake: 400, not a crash.
+        Camera failures don't reach here as these: act() already turns them into 502."""
+        try:
+            return await handler(request)
+        except (ValueError, KeyError, TypeError) as error:
+            raise web.HTTPBadRequest(text=f"bad request: {type(error).__name__}: {error}")
+
     async def index(self, request):
         return web.FileResponse(WEB / "index.html", headers={"Cache-Control": "no-cache"})
 
@@ -524,6 +533,8 @@ class Hub:
         """Original file, byte-for-byte (cached on the hub so several devices don't re-read the card)."""
         remote = request.query["path"]
         name = remote.rsplit("/", 1)[-1]
+        if not name or name.startswith(".") or "\\" in name:  # "..", or "..\\hub.json" on Windows, would leave the cache
+            raise web.HTTPBadRequest(text="not a camera file name")
         cached = CACHE / name
         if not cached.exists():
             await self.cam(self.cam_t.download, remote, CACHE)
@@ -589,7 +600,7 @@ class Hub:
         return web.json_response(await self.cam(self.cam_t.liveview_info))
 
     def app(self) -> web.Application:
-        app = web.Application(middlewares=[self.auth])
+        app = web.Application(middlewares=[self.auth, self.bad_input])
         r = app.router
         r.add_get("/", self.index)
         r.add_get("/pair", self.pair_page)
