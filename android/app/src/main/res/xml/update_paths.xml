@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- where Updates.java leaves a downloaded APK for the installer -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

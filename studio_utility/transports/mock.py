@@ -30,6 +30,10 @@ ABILITY = {
     "canon_log": ["Off", "Canon Log 3"],
     "log_assist": ["Off", "On"],
     "hdr_pq": ["Off", "On"],
+    "sound_recording": ["auto", "manual", "disable"],
+    "sound_level": [str(n) for n in range(0, 65, 4)],
+    "wind_filter": ["off", "auto"],
+    "attenuator": ["off", "on"],
 }
 WIDE_MM, TELE_MM = 14, 30
 
@@ -42,7 +46,8 @@ class MockTransport(Transport):
         self.values = {"exposure": "+0.0", "mode": "M", "iso": "400", "av": "f4.0", "tv": "1/125", "wb": "auto",
                        "movie_size": "4K 29.97p", "movie_format": "XF-HEVC S 4:2:2 10bit",
                        "movie_mode": "Auto", "movie_af": "Servo AF",
-                       "picture_style": "Standard", "canon_log": "Off", "log_assist": "Off", "hdr_pq": "Off"}
+                       "picture_style": "Standard", "canon_log": "Off", "log_assist": "Off", "hdr_pq": "Off",
+                       "sound_recording": "auto", "sound_level": "32", "wind_filter": "auto", "attenuator": "off"}
         self.files: list[str] = []
         self.recording_since: float | None = None
         self.zoom_pos = 0

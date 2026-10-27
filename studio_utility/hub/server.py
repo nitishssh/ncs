@@ -12,6 +12,8 @@ Run:  python -m studio_utility.hub --camera 10.11.0.2:8090      (or --camera moc
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 import sys
 import json
 import secrets
@@ -34,6 +36,7 @@ SNAPSHOT = ("movie_size", "iso", "tv", "av", "exposure", "wb", "af_method", "pic
 WEB = Path(__file__).parent / "web"
 CONFIG = CONFIG_DIR / "hub.json"
 CACHE = CONFIG_DIR / "hub-cache"
+PHONE_AUDIO = CONFIG_DIR / "phone-audio"  # mic recordings uploaded by phones, named by start time for sync
 LOG_MAX = 500
 LIVE_FPS = 15
 ACCESS_ROLE = web.RequestKey("access_role", str)
@@ -92,6 +95,23 @@ def device_name(user_agent: str) -> str:
     return "Browser"
 
 
+def canon_on_usb() -> bool:
+    """macOS: does the system itself list a Canon USB device (vendor 0x04A9)?"""
+    try:
+        out = subprocess.run(["ioreg", "-p", "IOUSB", "-l", "-w0"], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return False
+    return '"idVendor" = 1193' in out
+
+
+def restart_for_stale_usb(had_usb: bool, error: str) -> bool:
+    """macOS: after the camera is unplugged, Canon's SDK in this process never sees it again (ImageCaptureCore
+    keeps a suspended connection; a fresh process finds it in seconds - found 2026-10-26). When launchd runs
+    the hub (scripts/mac_hub_autostart.sh) it restarts it, so exit and come back fresh."""
+    return (sys.platform == "darwin" and had_usb and "no camera on USB" in error
+            and os.environ.get("XPC_SERVICE_NAME", "").startswith("com.studio-utility") and canon_on_usb())
+
+
 class Hub:
     def __init__(self, kind: str = "wifi", prefer_usb: bool = False, **camera_kwargs):
         self.kind, self.camera_kwargs = kind, camera_kwargs
@@ -113,6 +133,7 @@ class Hub:
         self.viewers = 0
         self.loop: asyncio.AbstractEventLoop | None = None
         self.stopping = False
+        self.had_usb = False  # a USB camera was connected earlier in this process
 
     def save_access(self):
         CONFIG.parent.mkdir(parents=True, exist_ok=True)
@@ -211,10 +232,15 @@ class Hub:
                         except Exception:
                             pass
                     self.t, self.caps = t, caps
+                    self.had_usb = self.had_usb or t.name == "usb-edsdk"
                     self.publish({"type": "connected", "connection": "connected", "caps": sorted(caps),
                                   "info": {"model": info.model, "firmware": info.firmware},
                                   "settings": settings, "status": self.safe_status()})
                 except Exception as e:
+                    if restart_for_stale_usb(self.had_usb, str(e)):
+                        print("Camera is back on USB but the SDK can't see it: exiting so launchd restarts the hub",
+                              flush=True)
+                        os._exit(75)
                     self.publish({"type": "connection", "connection": f"waiting for camera ({str(e)[:60]})"})
                     time.sleep(5)
                     continue
@@ -435,6 +461,58 @@ class Hub:
             return web.json_response(fresh)
         return web.json_response(await self.cam(self.cam_t.get_setting, key))
 
+    async def api_audio_upload(self, request):
+        """A phone's mic recording, streamed in (any size). Saved as <start>_Phone_<device>.wav so sync.pair_clips
+        lines it up with the clip recorded at the same time; non-WAV uploads (browser webm/mp4) are converted."""
+        try:
+            started = float(request.headers.get("X-Audio-Started") or time.time() * 1000) / 1000
+            time.localtime(started)
+        except (ValueError, OverflowError, OSError):
+            raise web.HTTPBadRequest(text="X-Audio-Started must be a start time in milliseconds")
+        device = "".join(c for c in request.get(DEVICE_NAME, "Phone") if c.isalnum()) or "Phone"
+        kind = request.content_type or ""
+        ext = ".wav" if "wav" in kind else ".mp4" if "mp4" in kind or "aac" in kind else ".webm"
+        PHONE_AUDIO.mkdir(parents=True, exist_ok=True)
+        stem = f"{time.strftime('%Y-%m-%d_%H%M%S', time.localtime(started))}_Phone_{device}"
+        wav, n = PHONE_AUDIO / (stem + ".wav"), 2
+        while wav.exists():  # a second take with the same start second must never replace the first
+            wav, n = PHONE_AUDIO / f"{stem}-{n}.wav", n + 1
+        raw = wav.with_suffix(ext + ".part")
+        size = 0
+        try:
+            with raw.open("wb") as f:
+                async for chunk in request.content.iter_chunked(1 << 16):
+                    f.write(chunk)
+                    size += len(chunk)
+            if not size:
+                raise web.HTTPBadRequest(text="empty recording")
+            if ext == ".wav":
+                raw.replace(wav)
+            else:
+                from studio_utility.sync import ffmpeg_exe
+                cmd = [ffmpeg_exe(), "-v", "error", "-y", "-i", str(raw),
+                       "-ar", "48000", "-c:a", "pcm_s24le", str(wav)]
+                proc = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE)
+                _, err = await proc.communicate()
+                if proc.returncode:
+                    wav.unlink(missing_ok=True)
+                    raise web.HTTPBadGateway(text=f"couldn't convert the recording: {err.decode(errors='replace')[-300:]}")
+        finally:  # a dropped connection or failed conversion leaves no half-written file behind
+            raw.unlink(missing_ok=True)
+        self.publish({"type": "audio", "by": request.get(DEVICE_NAME, "device"), "name": wav.name})
+        return web.json_response({"ok": True, "name": wav.name, "bytes": wav.stat().st_size})
+
+    async def api_audio_list(self, request):
+        files = sorted(PHONE_AUDIO.glob("*.wav")) if PHONE_AUDIO.exists() else []
+        return web.json_response([{"name": p.name, "bytes": p.stat().st_size} for p in files])
+
+    async def api_audio_file(self, request):
+        name = request.query.get("name", "")
+        path = PHONE_AUDIO / name
+        if "/" in name or "\\" in name or name.startswith(".") or not path.is_file():
+            raise web.HTTPNotFound(text="no such recording")
+        return web.FileResponse(path, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     async def api_files(self, request):
         return web.json_response(await self.cam(self.cam_t.list_files))
 
@@ -534,6 +612,9 @@ class Hub:
         r.add_get("/api/live.mjpg", self.api_live_mjpg)
         r.add_get("/api/live/info", self.api_live_info)
         r.add_get("/api/discover", self.api_discover)
+        r.add_post("/api/audio", self.api_audio_upload)
+        r.add_get("/api/audio", self.api_audio_list)
+        r.add_get("/api/audio/file", self.api_audio_file)
         def serve(name):
             async def handler(request):
                 return web.FileResponse(WEB / name)

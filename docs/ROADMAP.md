@@ -36,15 +36,15 @@ first, then verified on the real R50 V through the Windows relay.
 |---|---|---|---|
 | 4.1 | ✅ **Auto-reconnect** | Detect a dropped camera or relay, retry with backoff, keep the UI state | Turning the camera off and on reconnects by itself |
 | 4.2 | ✅ **Relay as a Windows service** | Start `ccapi_relay.py` at login (Task Scheduler), find the camera's IPv6 automatically | No manual relay command needed |
-| 4.3 | **Connection wizard** | One screen: mock / Wi-Fi via relay / Wi-Fi direct / USB / webcam, with guided checks | A new user connects without reading docs |
-| 4.4 | **Packaging** | PyInstaller `.app` and `.exe` | Double-click to run on both machines |
+| 4.3 | ✅ **Connection wizard** (first-run setup, one-QR pairing) | One screen: mock / Wi-Fi via relay / Wi-Fi direct / USB / webcam, with guided checks | A new user connects without reading docs |
+| 4.4 | ✅ **Packaging** | Mac `.app`/`.dmg`, Windows installer, Android app | Double-click to run on both machines |
 | 4.5 | ✅ **Automated tests** (41) | Mock-based UI tests plus a recorded-response CCAPI test for the R50 V | Tests run before every change |
 
 ## Phase 5: Untested connections
 | # | Item | Done when |
 |---|---|---|
 | 5.1 | USB webcam (UVC) with the R50 V | Live view in Studio Utility and OBS, delay measured |
-| 5.2 | USB tethering (EDSDK) | Shoot + download over USB on Windows (EDSDK download needed) |
+| 5.2 | ✅ USB tethering (EDSDK): shoot, record, download, live view, settings verified on the Mac (2026-10-26); Windows hub doesn't see the camera yet | Shoot + download over USB on Windows (EDSDK download needed) |
 | 5.3 | Bluetooth remote | Shutter/record over BLE; UUIDs verified with `studio-utility ble-scan --services` |
 
 ## Later, if needed

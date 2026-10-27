@@ -85,3 +85,29 @@ def test_no_pair_when_times_are_far_apart(tmp_path):
     shoot(tmp_path, 0.0)
     (tmp_path / "2026-10-23_120000_MicA_DJIMic.wav").rename(tmp_path / "2026-10-23_140000_MicA_DJIMic.wav")
     assert sync.pair_clips(tmp_path) == []
+
+
+def _clip(folder, audio: np.ndarray | None, name="A_0001C098_CANON.MP4", seconds=3):
+    clip = folder / name
+    cmd = [sync.ffmpeg_exe(), "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=25"]
+    if audio is not None:
+        sf.write(folder / "a.wav", np.stack([audio] * 2, 1).astype(np.float32), SR)
+        cmd += ["-i", str(folder / "a.wav"), "-c:a", "aac", "-shortest"]
+    subprocess.run(cmd + ["-t", str(seconds), "-c:v", "libx264", str(clip)], check=True)
+    return clip
+
+
+def test_warns_when_the_camera_recorded_no_sound(tmp_path):
+    """The 2026-10-26 demo: 4 minutes of 4K with no audio track because Sound rec. was off."""
+    assert "no sound track" in sync.clip_sound_problem(_clip(tmp_path, None))
+    assert "nearly silent" in sync.clip_sound_problem(_clip(tmp_path, np.zeros(SR * 3), "silent.MP4"))
+    assert sync.clip_sound_problem(_clip(tmp_path, speech_like(3, 5), "ok.MP4")) is None
+
+
+def test_sync_warns_about_a_faint_mic_but_still_merges(tmp_path):
+    clip = shoot(tmp_path, 0.5)
+    mic = tmp_path / "2026-10-23_120000_MicA_DJIMic.wav"
+    x, r = sf.read(mic)
+    sf.write(mic, x * 10 ** (-40 / 20), r, subtype="PCM_24")  # -40 dB: like the Kreo at -53 dBFS
+    res = sync.sync_clip(clip, mic)
+    assert res.output is not None and "very quiet" in (res.warning or "")

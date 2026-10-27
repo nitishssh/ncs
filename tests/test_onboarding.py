@@ -21,7 +21,12 @@ def test_recommendation(found, expected):
 @pytest.fixture
 def qapp():
     QtWidgets = pytest.importorskip("PySide6.QtWidgets")
-    return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    import shiboken6
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    before = set(app.topLevelWidgets())
+    yield app
+    for w in set(app.topLevelWidgets()) - before:  # left for PySide's exit cleanup, they crash the interpreter
+        shiboken6.delete(w)
 
 
 def _settle(qapp, dlg, cond):

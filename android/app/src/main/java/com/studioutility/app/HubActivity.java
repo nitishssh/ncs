@@ -46,6 +46,7 @@ public class HubActivity extends AppCompatActivity {
     private Hub hub;
     private Hubs hubs;
     private WebView web;
+    private PhoneMic mic;
     private View status;
     private TextView statusTitle, statusText;
     private ProgressBar spinner;
@@ -92,6 +93,8 @@ public class HubActivity extends AppCompatActivity {
             }
         });
         web.setDownloadListener((url, ua, disposition, mime, length) -> download(url, disposition, mime));
+        mic = new PhoneMic(this, web, hub, () -> base);
+        web.addJavascriptInterface(mic, "StudioAndroid");  // the page's MIC button records natively
 
         FrameLayout root = new FrameLayout(this);
         root.addView(web);
@@ -113,6 +116,7 @@ public class HubActivity extends AppCompatActivity {
 
     @Override protected void onResume() {
         super.onResume();
+        Updates.check(this);  // onResume: also after the user comes back from allowing installs
         if (web != null && base == null) connect();
     }
 
@@ -124,6 +128,7 @@ public class HubActivity extends AppCompatActivity {
     @Override protected void onDestroy() {
         main.removeCallbacks(retry);
         if (hubs != null) hubs.stop();
+        if (mic != null) mic.stop();
         super.onDestroy();
     }
 

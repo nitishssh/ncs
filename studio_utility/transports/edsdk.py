@@ -6,7 +6,9 @@ also pumps the SDK's event queue. Values use the same raw strings as the CCAPI t
 so labels, presets and the web app work unchanged."""
 from __future__ import annotations
 
+import atexit
 import queue
+import re
 import struct
 import sys
 import threading
@@ -20,7 +22,8 @@ from studio_utility.edsdk_native import EdsError
 SETTINGS = ("mode", "iso", "tv", "av", "exposure", "wb", "picture_style",
             # USB-only: not in the camera's Wi-Fi API
             "zoom_speed", "color_temp", "wb_shift_ab", "wb_shift_gm", "color_filter", "clip_prefix", "clip_name")
-WB_SHIFT = {"wb_shift_ab": 0, "wb_shift_gm": 1}  # index into kEdsPropID_WhiteBalanceShift's int32[2]
+WB_SHIFT = {"wb_shift_ab": 0, "wb_shift_gm": 1}
+KEEP_AWAKE_S = 60  # reset the camera's auto power-off this often while connected (it slept mid-session, 2026-10-27)  # index into kEdsPropID_WhiteBalanceShift's int32[2]
 
 
 def _pid(key: str) -> int:
@@ -160,6 +163,23 @@ def _sdk_thread() -> SdkThread:
     return _shared_thread
 
 
+# macOS: once EdsTerminateSDK has run in a process, a fresh EdsInitializeSDK only sees cameras plugged in AFTER it -
+# reconnecting to a camera that stayed on the cable found nothing until a replug or an app restart (2026-10-27).
+# So on macOS the SDK starts once per process and stays up; disconnect only closes the camera session.
+_resident: dict = {}
+
+
+def release_resident() -> None:
+    """Shut the process-wide SDK down - on quit. Skipping it left the camera claimed by the dead process: the next
+    launch saw 'no camera on USB' until a replug (2026-10-27)."""
+    sdk = _resident.pop("sdk", None)
+    if sdk is not None:
+        try:
+            sdk.terminate()
+        except Exception:
+            pass
+
+
 def _close_leftover():
     """A connect that outlived its timeout can still open the camera later; close that session before opening
     a new one, or the camera answers 'communication port in use' until the hub restarts."""
@@ -172,6 +192,8 @@ def _close_leftover():
             step(cam)
         except Exception:
             pass
+    if _resident.get("sdk") is sdk:
+        return  # the process-wide SDK stays up
     try:
         sdk.terminate()
     except Exception:
@@ -186,6 +208,7 @@ class EDSDKTransport(Transport):
     def __init__(self, sdk_factory=None, lib_path: str | None = None):
         """sdk_factory() -> object with edsdk_native.Sdk's methods (tests pass a fake)."""
         self._real_sdk = sdk_factory is None
+        self.keep_sdk_alive = sys.platform == "darwin" and self._real_sdk  # see _resident
         if sdk_factory is None:
             from studio_utility.edsdk_native import Sdk
             sdk_factory = lambda: Sdk(lib_path)  # noqa: E731
@@ -194,6 +217,8 @@ class EDSDKTransport(Transport):
         self.cam = None
         self.worker: SdkThread | None = None
         self.items: dict[str, int] = {}         # "edsdk:/DCIM/100CANON/IMG_0001.JPG" -> directory item ref
+        self.file_times: dict[str, float] = {}  # same keys -> capture time, for newest-first lists
+        self._awake_at = 0.0  # last ExtendShutDownTimer sent
         self._changes: set[int] = set()         # property IDs changed since the last events() call
         self._added: list[str] = []
         self._lost = False
@@ -229,8 +254,14 @@ class EDSDKTransport(Transport):
 
     def _connect(self):
         _close_leftover()
-        self.sdk = self.sdk_factory()
-        self.sdk.initialize()
+        if self.keep_sdk_alive and "sdk" in _resident:
+            self.sdk = _resident["sdk"]
+        else:
+            self.sdk = self.sdk_factory()
+            self.sdk.initialize()
+            if self.keep_sdk_alive:
+                _resident["sdk"] = self.sdk
+                atexit.register(release_resident)  # also covers quitting without a disconnect
         try:
             cams = self.sdk.cameras()
             for _ in range(30 if sys.platform == "darwin" else 0):  # macOS reports USB cameras a moment later
@@ -287,7 +318,8 @@ class EDSDKTransport(Transport):
                         pass
                 self.cam = None
         finally:
-            self.sdk.terminate()
+            if not (self.keep_sdk_alive and _resident.get("sdk") is self.sdk):
+                self.sdk.terminate()
 
     # ---- SDK callbacks (run on the SDK thread during pump)
     def _on_property(self, event, pid, param):
@@ -352,7 +384,19 @@ class EDSDKTransport(Transport):
             ability = [a for a in ability if not a.startswith("0x")]
             if len(ability) == 1:  # one option is no choice: e.g. ISO fixed to auto in P (value = live ISO)
                 ability = []
-        return {"value": codes.to_value(key, code), "ability": ability}
+        value = codes.to_value(key, code)
+        if key == "av" and not ability and not self._lens_can(value):
+            value = "auto"  # placeholder while the camera picks the iris: read as f/1.0 on an F4 lens (2026-10-27)
+        return {"value": value, "ability": ability}
+
+    def _lens_can(self, av: str) -> bool:
+        """Is this f-number possible on the attached lens? Its name carries the widest aperture ('... F4-6.3 ...')."""
+        try:
+            name = str(self.sdk.get_property(self.cam, codes.PROP["lens_name"]))
+            widest = float(re.search(r"F(\d+(?:\.\d+)?)", name)[1])
+            return float(av.lstrip("f")) >= widest - 0.05
+        except Exception:
+            return True  # unknown lens or value: don't second-guess the camera
 
     def get_setting(self, key: str) -> dict:
         if key not in SETTINGS:
@@ -406,8 +450,16 @@ class EDSDKTransport(Transport):
         self._run(go)
 
     def record(self, start: bool) -> None:
-        self._run(self.sdk.set_property, self.cam, codes.PROP["record"],
-                  codes.RECORD_START if start else codes.RECORD_STOP)
+        try:
+            self._run(self.sdk.set_property, self.cam, codes.PROP["record"],
+                      codes.RECORD_START if start else codes.RECORD_STOP)
+        except EdsError as e:
+            # the R50 V answers "device busy" for several states: a stills mode (found with A+), already recording
+            # from its own button, a menu or playback open (seen 2026-10-26 with the switch on movie) - name them all
+            if start and e.code == codes.ERR_DEVICE_BUSY:
+                raise RuntimeError("the camera is busy and won't start recording: check it isn't already recording "
+                                   "from its own button, close any menu or playback, and use a movie mode") from e
+            raise
         self._rec_since = time.time() if start else None
 
     # ---- live view
@@ -472,6 +524,12 @@ class EDSDKTransport(Transport):
     # ---- status
     def status(self) -> dict:
         def read():
+            if time.time() - self._awake_at >= KEEP_AWAKE_S:  # while connected the camera mustn't power off
+                try:
+                    self.sdk.command(self.cam, codes.CMD_EXTEND_SHUTDOWN, 0)
+                    self._awake_at = time.time()
+                except Exception:
+                    pass
             out = {"temp": "normal",
                    "recording": int(time.time() - self._rec_since) if self._rec_since else None}
             try:
@@ -495,6 +553,8 @@ class EDSDKTransport(Transport):
                 self.sdk.release(child)
             else:
                 self.items[path] = child
+                if info.get("time"):
+                    self.file_times[path] = info["time"]
                 out.append(path)
 
     def list_files(self) -> list[str]:
@@ -502,6 +562,7 @@ class EDSDKTransport(Transport):
             for ref in self.items.values():
                 self.sdk.release(ref)
             self.items.clear()
+            self.file_times.clear()
             out: list[str] = []
             for vol in self.sdk.children(self.cam):  # memory cards
                 self._walk(vol, "edsdk:", out)

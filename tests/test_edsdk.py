@@ -161,6 +161,14 @@ def test_shoot_focus_and_record(t, fake):
     assert fake.props[codes.PROP["record"]] == codes.RECORD_STOP
 
 
+def test_record_when_busy_names_every_likely_cause(t, fake):
+    def busy(ref, pid, value, param=0):
+        raise EdsError("set property 0x510", codes.ERR_DEVICE_BUSY)
+    fake.set_property = busy
+    with pytest.raises(RuntimeError, match="already recording.*menu.*movie mode"):
+        t.record(True)
+
+
 def test_live_view_turns_on_pc_output_and_waits_for_first_frame(t, fake):
     assert t.liveview_frame() == b"\xff\xd8frame\xff\xd9"
     assert fake.props[codes.PROP["evf_output"]] & codes.EVF_OUTPUT_PC  # kept the camera screen bit too
@@ -399,3 +407,66 @@ def test_session_left_open_by_a_timed_out_connect_is_closed_first(fake, monkeypa
     assert closed == [CAM] and mod._open_session["s"][1] == CAM
     t2.disconnect()
     assert "s" not in mod._open_session
+
+
+def test_mac_keeps_one_sdk_alive_so_reconnect_finds_the_camera(monkeypatch):
+    """macOS: terminate + initialize in one process loses a camera that stayed plugged in, so the SDK starts once
+    and disconnect only closes the session; connect -> disconnect -> connect must not restart it."""
+    from studio_utility.transports import edsdk as mod
+    monkeypatch.setattr(mod, "_resident", {})
+    fake = FakeSdk()
+    for _ in range(3):
+        tr = EDSDKTransport(sdk_factory=lambda: fake)
+        tr.keep_sdk_alive = True
+        tr.connect()
+        tr.disconnect()
+    assert fake.running == 1  # initialized once, never terminated (a second initialize would have raised)
+
+
+def test_quitting_shuts_the_resident_sdk_down(monkeypatch):
+    """Left running, the dead process kept the camera: the next launch found 'no camera on USB'."""
+    from studio_utility.transports import edsdk as mod
+    monkeypatch.setattr(mod, "_resident", {})
+    fake = FakeSdk()
+    tr = EDSDKTransport(sdk_factory=lambda: fake)
+    tr.keep_sdk_alive = True
+    tr.connect()
+    tr.disconnect()
+    assert fake.running == 1
+    mod.release_resident()
+    assert fake.running == 0 and mod._resident == {}
+    mod.release_resident()  # quitting twice (closeEvent, then atexit) is harmless
+
+
+def test_photo_in_movie_mode_says_so(t, fake):
+    """Seen on the R50 V: Shoot on the movie side failed with a bare 'EDSDK error 0x00008D0C'."""
+    def refuse(cam, cmd, param=0):
+        raise EdsError("command 0x4", 0x8D0C)
+    fake.command = refuse
+    with pytest.raises(EdsError, match="photo/movie switch to photo"):
+        t.shoot()
+
+
+def test_aperture_placeholder_reads_auto_not_f1(t, fake):
+    """R50 V in P/movie auto: Av came back as 0x08 (f/1.0) on an F4 lens with no real choices."""
+    from studio_utility import edsdk_codes as codes
+    get = fake.get_property
+
+    def prop(cam, pid):
+        if pid == codes.PROP["av"]:
+            return 0x08
+        if pid == codes.PROP["lens_name"]:
+            return "RF-S14-30mm F4-6.3 IS STM PZ"
+        return get(cam, pid)
+    fake.get_property = prop
+    fake.property_options = lambda cam, pid: [0xF30]
+    assert t.get_setting("av") == {"value": "auto", "ability": []}
+
+
+def test_keeps_the_camera_awake_while_connected(t, fake, monkeypatch):
+    from studio_utility import edsdk_codes as codes
+    sent = []
+    fake.command = lambda cam, cmd, param=0: sent.append(cmd)
+    t.status()
+    t.status()  # within a minute: no second command
+    assert sent.count(codes.CMD_EXTEND_SHUTDOWN) == 1

@@ -43,7 +43,7 @@ coll = COLLECT(exe, a.binaries, a.datas, name="studio-utility")
 
 if sys.platform == "darwin":
     app = BUNDLE(coll, name="Studio Utility.app", bundle_identifier="com.studio-utility.app", icon=icon, info_plist={
-        "CFBundleShortVersionString": "0.1.0",
+        "CFBundleShortVersionString": "0.4.0",
         "NSHighResolutionCapable": True,
         # Reaching the camera relay on the Thunderbolt network needs macOS local-network permission
         "NSLocalNetworkUsageDescription": "Studio Utility connects to your Canon camera on the local network.",

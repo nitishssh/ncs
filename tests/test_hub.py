@@ -251,3 +251,80 @@ def test_live_view_failures_dont_drop_the_camera(hub):
         assert r.status_code == 503
     assert "object not ready" in r.text
     assert h.t is t and c.get("/api/settings/iso").status_code == 200
+
+
+def test_restart_for_stale_usb_only_under_launchd_on_mac(monkeypatch):
+    from studio_utility.hub import server
+    monkeypatch.setattr(server.sys, "platform", "darwin")
+    monkeypatch.setattr(server, "canon_on_usb", lambda: True)
+    monkeypatch.setenv("XPC_SERVICE_NAME", "com.studio-utility.hub")
+    err = "usb-edsdk: no camera on USB: set the camera's USB connection; wifi: timed out"
+    assert server.restart_for_stale_usb(True, err)
+    assert not server.restart_for_stale_usb(False, err)  # never had the camera: a fresh process wouldn't help
+    monkeypatch.setattr(server, "canon_on_usb", lambda: False)
+    assert not server.restart_for_stale_usb(True, err)  # really unplugged: keep waiting
+    monkeypatch.setattr(server, "canon_on_usb", lambda: True)
+    monkeypatch.delenv("XPC_SERVICE_NAME")
+    assert not server.restart_for_stale_usb(True, err)  # run by hand: nobody would restart it
+
+
+def _wav_bytes(seconds=0.5):
+    import io
+
+    import numpy as np
+    import soundfile as sf
+    buf = io.BytesIO()
+    sf.write(buf, np.zeros((int(48000 * seconds), 1), np.float32), 48000, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
+def test_phone_mic_upload_is_named_for_sync(hub, tmp_path, monkeypatch):
+    pytest.importorskip("soundfile")
+    from studio_utility import sync
+    h, base = hub
+    monkeypatch.setattr(server, "PHONE_AUDIO", tmp_path / "phone")
+    c = client(h, base, "Pixel 8")
+    started = time.mktime((2026, 10, 26, 14, 30, 5, 0, 0, -1)) * 1000
+    r = c.post("/api/audio", content=_wav_bytes(),
+               headers={"Content-Type": "audio/wav", "X-Audio-Started": str(int(started))})
+    assert r.status_code == 200, r.text
+    name = r.json()["name"]
+    assert name == "2026-10-26_143005_Phone_Pixel8.wav"
+    assert sync.voice_start(tmp_path / "phone" / name).hour == 14  # sync.pair_clips can line it up by time
+    assert [f["name"] for f in c.get("/api/audio").json()] == [name]
+    assert c.get("/api/audio/file", params={"name": name}).content[:4] == b"RIFF"
+    assert c.get("/api/audio/file", params={"name": "../hub.json"}).status_code == 404
+    assert c.post("/api/audio", content=b"", headers={"Content-Type": "audio/wav"}).status_code == 400
+
+
+def test_browser_recordings_are_converted_to_wav(hub, tmp_path, monkeypatch):
+    sf = pytest.importorskip("soundfile")
+    h, base = hub
+    monkeypatch.setattr(server, "PHONE_AUDIO", tmp_path / "phone")
+    r = client(h, base, "iPhone").post("/api/audio", content=_wav_bytes(1.0), headers={"Content-Type": "audio/mp4"})
+    assert r.status_code == 200, r.text
+    info = sf.info(tmp_path / "phone" / r.json()["name"])
+    assert (info.samplerate, info.subtype) == (48000, "PCM_24") and round(info.duration) == 1
+    assert list((tmp_path / "phone").iterdir()) == [tmp_path / "phone" / r.json()["name"]]  # upload removed
+
+
+def test_upload_rejects_a_bad_start_time_and_keeps_both_takes(hub, tmp_path, monkeypatch):
+    pytest.importorskip("soundfile")
+    h, base = hub
+    monkeypatch.setattr(server, "PHONE_AUDIO", tmp_path / "phone")
+    c = client(h, base, "Pixel 8")
+    for bad in ("soon", "1e30", "nan"):
+        r = c.post("/api/audio", content=_wav_bytes(), headers={"Content-Type": "audio/wav", "X-Audio-Started": bad})
+        assert r.status_code == 400, bad
+    head = {"Content-Type": "audio/wav", "X-Audio-Started": "1793000000000"}
+    first, second = (c.post("/api/audio", content=_wav_bytes(), headers=head).json()["name"] for _ in range(2))
+    assert first != second and second.endswith("-2.wav")
+    assert sorted(p.name for p in (tmp_path / "phone").iterdir()) == sorted([first, second])
+
+
+def test_failed_conversion_leaves_nothing_behind(hub, tmp_path, monkeypatch):
+    h, base = hub
+    monkeypatch.setattr(server, "PHONE_AUDIO", tmp_path / "phone")
+    r = client(h, base, "iPhone").post("/api/audio", content=b"not audio", headers={"Content-Type": "audio/webm"})
+    assert r.status_code == 502
+    assert list((tmp_path / "phone").iterdir()) == []

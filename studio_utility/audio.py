@@ -22,6 +22,32 @@ except Exception:  # PortAudio missing: the UI shows the Audio tab as unavailabl
 
 KNOWN = {"Wireless Mic Rx": "DJI Mic", "Kreo Sonik": "Kreo Sonik"}
 RATE = 48000
+RECENT_S = 8  # rolling window kept for live suggestions
+
+# Where a sound comes from, judged by the name the OS gives the input:
+#  camera   - the R50 V itself over USB (UVC/UAC streaming) or an HDMI capture card carrying its audio
+#  computer - the Mac's or PC's own microphone
+#  external - receivers and USB mics (DJI Mic, Kreo Sonik, interfaces…)
+#  virtual  - loopback devices (BlackHole, VB-Cable): other apps' sound, not a mic
+SOURCES = ("camera", "computer", "external", "virtual")
+SOURCE_LABELS = {"camera": "Camera", "computer": "This computer", "external": "External mic",
+                 "virtual": "Virtual", "phone": "Phone"}
+_CAMERA = ("eos", "canon", "cam link", "hdmi", "capture", "usb video", "uvc", "elgato", "game capture",
+           "camera", "webcam", "owl")  # a webcam's built-in mic (Owl 4K PRO Camera) is camera audio, not an external mic
+_COMPUTER = ("macbook", "imac", "mac mini", "mac studio", "built-in", "internal", "microphone array",
+             "realtek", "intel smart sound", "conexant", "iphone microphone")
+_VIRTUAL = ("blackhole", "loopback", "vb-audio", "cable output", "soundflower", "stereo mix", "zoomaudio",
+            "teams audio", "aggregate", "multi-output")
+
+
+def source_kind(name: str) -> str:
+    n = name.lower()
+    if any(k.lower() in n for k in KNOWN):
+        return "external"
+    for kind, words in (("virtual", _VIRTUAL), ("camera", _CAMERA), ("computer", _COMPUTER)):
+        if any(w in n for w in words):
+            return kind
+    return "external"
 
 
 @dataclass
@@ -29,6 +55,10 @@ class InputDevice:
     name: str
     channels: int
     rate: int
+
+    @property
+    def kind(self) -> str:
+        return source_kind(self.name)
 
     @property
     def label(self) -> str:
@@ -75,10 +105,12 @@ class OutputRoute:
 
 
 def input_devices() -> list[InputDevice]:
+    """Every input, grouped camera -> computer -> external -> virtual (stable order inside a group)."""
     if sd is None:
         return []
-    return [InputDevice(d["name"], d["max_input_channels"], int(d["default_samplerate"]))
-            for d in sd.query_devices() if d["max_input_channels"] > 0]
+    found = [InputDevice(d["name"], d["max_input_channels"], int(d["default_samplerate"]))
+             for d in sd.query_devices() if d["max_input_channels"] > 0]
+    return sorted(found, key=lambda d: SOURCES.index(d.kind))
 
 
 def dbfs(x: float) -> float:
@@ -94,6 +126,10 @@ class MicInput:
     def __init__(self, device: str, channels: int = 2, rate: int = RATE):
         if sd is None:
             raise RuntimeError("audio support unavailable (pip install sounddevice soundfile)")
+        try:  # built-in laptop mics are mono: ask for what the device has (max 2)
+            channels = max(1, min(channels, sd.query_devices(device)["max_input_channels"]))
+        except Exception:
+            pass
         self.device, self.channels, self.rate = device, channels, rate
         self._levels = [(-120.0, -120.0)] * channels
         self.clipped = False
@@ -104,6 +140,7 @@ class MicInput:
         self.process = None              # callable(block) -> block: the live voice chain
         self.outputs: list[OutputRoute] = []
         self._capture: list | None = None  # blocks collected by capture() (noise profile)
+        self._recent: collections.deque = collections.deque(maxlen=int(RECENT_S * rate / 1024) + 1)
         self.stream = sd.InputStream(device=device, channels=channels, samplerate=rate, dtype="float32",
                                      blocksize=1024, callback=self._callback)
         self.stream.start()
@@ -118,6 +155,7 @@ class MicInput:
             self._q.put(data.copy())     # recordings stay raw; the cleaned copy is made offline
         if self._capture is not None:
             self._capture.append(data.copy())
+        self._recent.append(data.copy())
         if self.outputs:
             out = data
             if self.process is not None:
@@ -127,6 +165,11 @@ class MicInput:
                     self.process = None  # a broken plugin must not kill the audio stream
             for route in self.outputs:
                 route.push(out.copy())
+
+    def recent(self) -> np.ndarray:
+        """The last RECENT_S seconds of input (raw), for live suggestions."""
+        blocks = list(self._recent)
+        return np.concatenate(blocks) if blocks else np.zeros((0, self.channels), np.float32)
 
     def levels(self) -> list[tuple[float, float]]:
         return list(self._levels)
