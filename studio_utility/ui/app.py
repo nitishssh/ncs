@@ -81,19 +81,80 @@ QListWidget { background:#1a1a1a; border:1px solid #2a2a2a; border-radius:6px; }
 
 
 class Preview(QLabel):
-    """Live view that reports clicks as normalized image coordinates (ignores letterbox bars)."""
+    """Live view that reports clicks as normalized image coordinates (ignores letterbox bars).
+    Frames are scaled at the screen's real pixel density, so Retina displays get a sharp picture."""
     clicked = Signal(float, float)
+    toggle_full = Signal()
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.frame: QImage | None = None
+
+    def show_image(self, image: QImage):
+        self.frame = image
+        self.rescale()
+
+    def rescale(self):
+        if self.frame is None or self.frame.isNull():
+            return
+        dpr = self.devicePixelRatioF()
+        pix = QPixmap.fromImage(self.frame.scaled(self.size() * dpr, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        pix.setDevicePixelRatio(dpr)
+        self.setPixmap(pix)
+
+    def clear_image(self, text: str = "No live view"):
+        self.frame = None
+        self.clear()
+        self.setText(text)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.rescale()
+
+    def mouseDoubleClickEvent(self, e):
+        self.toggle_full.emit()
 
     def mousePressEvent(self, e):
         pix = self.pixmap()
         if pix is None or pix.isNull():
             return
-        ox = (self.width() - pix.width()) / 2
-        oy = (self.height() - pix.height()) / 2
-        x = (e.position().x() - ox) / pix.width()
-        y = (e.position().y() - oy) / pix.height()
+        size = pix.deviceIndependentSize()
+        ox = (self.width() - size.width()) / 2
+        oy = (self.height() - size.height()) / 2
+        x = (e.position().x() - ox) / size.width()
+        y = (e.position().y() - oy) / size.height()
         if 0 <= x <= 1 and 0 <= y <= 1:
             self.clicked.emit(x, y)
+
+
+class FullView(Preview):
+    """Full-screen live view: double-click, F or Esc to leave; clicks still focus."""
+    closed = Signal()
+
+    def __init__(self):
+        super().__init__("No live view")
+        self.setWindowTitle("Studio Utility - Live view")
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("background:#000; color:#888;")
+        self.setCursor(Qt.CrossCursor)
+        self.setToolTip("Click to focus · double-click, F or Esc to exit")
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Escape, Qt.Key_F):
+            self.close()
+        else:
+            super().keyPressEvent(e)
+
+    def closeEvent(self, e):
+        self.closed.emit()
+        super().closeEvent(e)
+
+
+def bgr_image(frame: np.ndarray) -> QImage:
+    """OpenCV BGR frame -> QImage that owns its pixels."""
+    rgb = np.ascontiguousarray(frame[:, :, ::-1])
+    h, w = rgb.shape[:2]
+    return QImage(rgb.data, w, h, rgb.strides[0], QImage.Format_RGB888).copy()
 
 
 def pill(text: str = "") -> QLabel:
@@ -165,6 +226,8 @@ class MainWindow(QMainWindow):
         self.preview.setMinimumSize(320, 160)  # grows with the window; 360 tall pushed it past a laptop screen
         self.preview.setToolTip("Click to focus here")
         self.preview.clicked.connect(self.focus_at)
+        self.preview.toggle_full.connect(self.toggle_full_view)
+        self.full_view: FullView | None = None
 
         # Zoom row
         self.zoom = QSlider(Qt.Horizontal)
@@ -173,6 +236,10 @@ class MainWindow(QMainWindow):
         self.af_btn = QPushButton("AF")
         self.af_btn.setToolTip("Focus without taking a picture")
         self.af_btn.clicked.connect(lambda: self.run_camera("focus", self.t.half_press))
+        self.full_btn = QPushButton("⛶")
+        self.full_btn.setToolTip("Full-screen live view (F; double-click the preview)")
+        self.full_btn.setShortcut("F")
+        self.full_btn.clicked.connect(self.toggle_full_view)
         # Continuous power zoom (real R50 V): hold W/T to move, release to stop
         self.wide_btn, self.tele_btn = QPushButton("◀ W"), QPushButton("T ▶")
         for b, d in ((self.wide_btn, "wide"), (self.tele_btn, "tele")):
@@ -187,6 +254,7 @@ class MainWindow(QMainWindow):
         for cb in (self.ov_hist, self.ov_af, self.ov_peak, self.ov_zebra):
             zoom_row.addWidget(cb)
         zoom_row.addWidget(self.af_btn)
+        zoom_row.addWidget(self.full_btn)
 
         # Settings tabs
         self.boxes: dict[str, QComboBox] = {}
@@ -275,9 +343,9 @@ class MainWindow(QMainWindow):
         root.setSpacing(10)
         root.addLayout(top)
         root.addLayout(status)
-        root.addWidget(self.preview, 1)
+        root.addWidget(self.preview, 3)  # live view gets most of the spare height; settings grids need little
         root.addLayout(zoom_row)
-        root.addWidget(self.tabs)
+        root.addWidget(self.tabs, 1)
         root.addLayout(controls)
         root.addWidget(self.files)
         root.addWidget(self.msg)
@@ -541,7 +609,7 @@ class MainWindow(QMainWindow):
         self.disconnect(user=False)
         self._attempts = 0
         self.conn_btn.setText("Stop")
-        self.preview.setText("Reconnecting…")
+        self.preview.clear_image("Reconnecting…")
         self.flash(f"Connection lost ({why}). Reconnecting…")
         self.retry.start(5000)
 
@@ -594,8 +662,9 @@ class MainWindow(QMainWindow):
         self.caps = set()
         self.recording = False
         self.update_rec()
-        self.preview.clear()
-        self.preview.setText("No live view")
+        self.preview.clear_image()
+        if self.full_view:
+            self.full_view.clear_image()
         self.model.setText("Disconnected")
         self.set_connected(False)
         self.framegen.setVisible(False)
@@ -840,12 +909,36 @@ class MainWindow(QMainWindow):
                 if self.lut is not None:
                     frame = apply_lut(frame, self.lut)
                 frame = self.apply_overlays(frame, want_info)
-                jpg = cv2.imencode(".jpg", frame)[1].tobytes()
+                image = bgr_image(frame)  # straight to the screen: no second JPEG pass to blur it
+            else:
+                image = QImage.fromData(jpg)
         except Exception as error:
             self.liveview_failed(error)
             return
-        pix = QPixmap.fromImage(QImage.fromData(jpg))
-        self.preview.setPixmap(pix.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.preview.show_image(image)
+        if self.full_view:
+            self.full_view.show_image(image)
+
+    def toggle_full_view(self):
+        if self.full_view:
+            self.full_view.close()
+            return
+        self.full_view = FullView()
+        self.full_view.clicked.connect(self.focus_at)
+        self.full_view.toggle_full.connect(self.toggle_full_view)
+        self.full_view.closed.connect(self._full_view_closed)
+        if self.preview.frame is not None:
+            self.full_view.show_image(self.preview.frame)
+        screen = self.screen()
+        if screen:
+            self.full_view.setGeometry(screen.geometry())
+        self.full_view.showFullScreen()
+
+    def _full_view_closed(self):
+        view, self.full_view = self.full_view, None
+        if view:
+            view.deleteLater()
+        self.activateWindow()
 
     def apply_overlays(self, frame, want_info: bool):
         # Peaking and zebras are computed locally; histogram and AF boxes come from the camera
@@ -865,6 +958,8 @@ class MainWindow(QMainWindow):
         return frame
 
     def closeEvent(self, e):
+        if self.full_view:
+            self.full_view.close()
         self.io.shutdown()
         self.audio.shutdown()
         self._want = None
