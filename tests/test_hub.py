@@ -328,3 +328,32 @@ def test_failed_conversion_leaves_nothing_behind(hub, tmp_path, monkeypatch):
     r = client(h, base, "iPhone").post("/api/audio", content=b"not audio", headers={"Content-Type": "audio/webm"})
     assert r.status_code == 502
     assert list((tmp_path / "phone").iterdir()) == []
+
+
+def test_file_cache_never_serves_a_different_file_with_the_same_name(hub):
+    h, base = hub
+    c = client(h, base, "phone")
+    remote = "/card/100CANON/IMG_0001.JPG"
+    contents, downloads = {"thumb": b"first", "bytes": b"first photo"}, []
+
+    def download(path, dest, progress=None, cancel=None):
+        downloads.append(path)
+        dest.mkdir(parents=True, exist_ok=True)
+        out = dest / path.rsplit("/", 1)[-1]
+        out.write_bytes(contents["bytes"])
+        return out
+    h.t.download = download
+    h.t.thumbnail = lambda path: contents["thumb"]
+
+    get = lambda path=remote: c.get("/api/file", params={"path": path}).content  # noqa: E731
+    assert get() == b"first photo" and get() == b"first photo"
+    assert len(downloads) == 1  # a second device doesn't re-read the card
+    contents.update(thumb=b"second", bytes=b"second photo")  # card formatted, the name is used again
+    assert get() == b"second photo"
+    assert get("/card/101CANON/IMG_0001.JPG") == b"second photo" and len(downloads) == 3  # same name, other folder
+
+    def no_thumbnail(path):
+        raise RuntimeError("no thumbnail")
+    h.t.thumbnail = no_thumbnail
+    contents["bytes"] = b"third photo"
+    assert get() == b"third photo"
