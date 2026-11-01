@@ -42,10 +42,10 @@ class LightingTab(QWidget):
                      QSpinBox(minimum=-180, maximum=180, singleStep=15, value=int(light.azimuth)),
                      QSpinBox(minimum=-30, maximum=90, singleStep=15, value=int(light.elevation)),
                      QSpinBox(minimum=2000, maximum=10000, singleStep=100, value=light.kelvin)]
-            on.toggled.connect(self.update)
+            on.toggled.connect(self.refresh)
             grid.addWidget(on, row, 0)
             for col, s in enumerate(spins, 1):
-                s.valueChanged.connect(self.update)
+                s.valueChanged.connect(self.refresh)
                 grid.addWidget(s, row, col)
             self.rows.append((on, *spins))
         n = len(self.scene.lights) + 1
@@ -53,7 +53,7 @@ class LightingTab(QWidget):
         self.amb_lux = QSpinBox(minimum=0, maximum=100000, singleStep=10, value=int(self.scene.ambient_lux))
         self.amb_k = QSpinBox(minimum=2000, maximum=10000, singleStep=100, value=self.scene.ambient_kelvin)
         for s, col in ((self.amb_lux, 1), (self.amb_k, 5)):
-            s.valueChanged.connect(self.update)
+            s.valueChanged.connect(self.refresh)
             grid.addWidget(s, n, col)
 
         self.fps = QComboBox()
@@ -65,7 +65,7 @@ class LightingTab(QWidget):
             self.aperture.addItem(f"f/{f:g}", f)
         self.aperture.setCurrentIndex(2)
         for b in (self.fps, self.aperture):
-            b.currentIndexChanged.connect(self.update)
+            b.currentIndexChanged.connect(self.refresh)
         opts = QHBoxLayout()
         opts.addWidget(_cap("Shoot"))
         opts.addWidget(self.fps)
@@ -101,12 +101,12 @@ class LightingTab(QWidget):
         root.addLayout(left, 1)
         root.addWidget(self.preview, 0, Qt.AlignTop)
         self.set_connected(False)
-        self.update()
+        self.refresh()
 
     def set_connected(self, on: bool):
         self.apply_btn.setEnabled(on)
 
-    def update(self, *_):
+    def refresh(self, *_):
         for light, (on, lux, dist, az, el, k) in zip(self.scene.lights, self.rows):
             light.on, light.lux_1m, light.distance = on.isChecked(), lux.value(), dist.value()
             light.azimuth, light.elevation, light.kelvin = az.value(), el.value(), k.value()
@@ -127,11 +127,11 @@ class LightingTab(QWidget):
         self.preview.setPixmap(QPixmap.fromImage(q.copy()))
 
     def showEvent(self, e):  # the camera's value lists may have loaded since the last update
-        self.update()
+        self.refresh()
         super().showEvent(e)
 
     def send(self):
-        self.update()
+        self.refresh()
         done = self.apply_fn(self.result.settings())
         if done:
             self.message.emit(f"Sent {', '.join(done)}. To keep it, register it as C3 on the camera.")

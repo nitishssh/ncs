@@ -163,13 +163,18 @@ def suggest(scene: Scene, aperture: float, fps: float | None = None, choices: di
     error = math.log2(real_iso * t * 2 ** ev / (100 * n * n))
 
     k = scene.kelvin()
-    mixed = {l.kelvin for l in scene.lights if l.on} | ({scene.ambient_kelvin} if scene.ambient_lux > 5 else set())
-    if max(mixed) - min(mixed) >= 1500:
+    enough = scene.subject_lux() * 0.1  # a source under a tenth of the light can't visibly shift the face
+    mixed = {l.kelvin for l in scene.lights if l.lux() >= enough}
+    if scene.ambient_lux >= enough:
+        mixed.add(scene.ambient_kelvin)
+    if mixed and max(mixed) - min(mixed) >= 1500:
         notes.append("Mixed colour temperatures: gel the odd light out or the face will shift colour.")
-    ct = _nearest(ch.get("color_temp", []), parse_iso, k, log=False)
+    # A Kelvin value only takes effect in the camera's colour temperature WB mode
+    kelvin_wb = next((c for c in ch["wb"] if c.lower() in ("colortemp", "color temperature", "color temp")), None)
+    ct = _nearest(ch.get("color_temp", []), parse_iso, k, log=False) if kelvin_wb else None
     named = {c: WB_PRESETS[c] for c in ch["wb"] if c in WB_PRESETS}
-    if ct and any(c.lower() in ("colortemp", "color temperature", "color temp") for c in ch["wb"]):
-        wb = next(c for c in ch["wb"] if c.lower() in ("colortemp", "color temperature", "color temp"))
+    if ct:
+        wb = kelvin_wb
     elif named:
         wb = min(named, key=lambda c: abs(1e6 / named[c] - 1e6 / k))
     else:

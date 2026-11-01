@@ -43,6 +43,17 @@ def test_wb_follows_lights():
     assert kelvin_rgb(3200)[2] < kelvin_rgb(6500)[2]
 
 
+def test_kelvin_needs_the_cameras_colour_temperature_mode():
+    s = suggest(Scene(), 4, choices={"color_temp": ["5600"], "wb": ["auto", "daylight"]})
+    assert (s.wb, s.color_temp) == ("daylight", None)
+
+
+def test_mixed_warning_ignores_weak_sources():
+    mixed = lambda s: any("Mixed" in n for n in suggest(s, 4).notes)  # noqa: E731
+    assert not mixed(Scene([Light("Key", 2000, 1, 0, 0, 5600)], ambient_lux=30, ambient_kelvin=3200))
+    assert mixed(Scene([Light("Key", 2000, 1, 0, 0, 5600)], ambient_lux=1000, ambient_kelvin=3200))
+
+
 def test_render_brightens_with_overexposure():
     scene = Scene()
     assert render(scene, 5600, 1.0).mean() > render(scene, 5600, 0.0).mean() > render(scene, 5600, -1.0).mean()
