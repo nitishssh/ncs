@@ -56,6 +56,12 @@ def test_protocol_errors_and_notifications(tools):
     assert respond(tools, b'{"jsonrpc":"2.0","method":"notifications/initialized"}') is None
 
 
+def test_malformed_requests_get_an_error_and_the_server_survives(tools):
+    for params in ([1], {"name": ["x"]}):
+        assert rpc(tools, "tools/call", params)["error"]["code"] == -32603
+    assert rpc(tools, "ping")["result"] == {}
+
+
 def test_serve_answers_line_by_line(tools):
     out = io.BytesIO()
     serve(tools, io.BytesIO(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n\n'

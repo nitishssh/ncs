@@ -272,6 +272,8 @@ def respond(tools: CameraTools, line: bytes) -> dict | None:
         result = handle(tools, message.get("method", ""), message.get("params") or {})
     except RpcError as error:
         return {"jsonrpc": "2.0", "id": message["id"], "error": {"code": error.code, "message": error.message}}
+    except Exception as error:  # noqa: BLE001 - a malformed request must not end the server
+        return {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32603, "message": f"bad request: {error}"}}
     return {"jsonrpc": "2.0", "id": message["id"], "result": result}
 
 
