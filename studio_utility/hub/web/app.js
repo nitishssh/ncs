@@ -366,6 +366,7 @@ async function loadFiles() {
   const grid = $("files");
   try {
     const files = (await api("files")).slice().reverse();
+    for (const p of [...ticked]) if (!files.includes(p)) ticked.delete(p);
     $("filecount").textContent = `${files.length} files on the card`;
     grid.innerHTML = "";
     const io = new IntersectionObserver((entries) => {
@@ -382,14 +383,63 @@ async function loadFiles() {
       a.className = "tile";
       a.dataset.path = p;
       a.href = "/api/file?path=" + encodeURIComponent(p);
+      a.classList.toggle("ticked", ticked.has(p));
+      a.onclick = (ev) => {
+        if (!selecting) return;  // not selecting: a tap downloads the file, as a plain link
+        ev.preventDefault();
+        haptic();
+        setTicked(a, !ticked.has(p));
+        updateSelection();
+      };
       a.innerHTML = `<img alt="${name}" onload="this.classList.add('loaded')"><span class="badge">${ext === "JPG" ? "" : ext}</span>`;
       if (ext === "JPG") a.querySelector(".badge").remove();
       grid.appendChild(a);
       io.observe(a);
     }
+    updateSelection();
   } catch (e) { $("filecount").textContent = "Files unavailable: " + e.message; }
 }
 $("reload").onclick = loadFiles;
+
+// tick several files, then download them together
+let selecting = false;
+const ticked = new Set();
+function setTicked(tile, on) {
+  if (on) ticked.add(tile.dataset.path); else ticked.delete(tile.dataset.path);
+  tile.classList.toggle("ticked", on);
+}
+function updateSelection() {
+  const tiles = $("files").children;
+  $("getselected").disabled = !ticked.size;
+  $("getselected").textContent = ticked.size ? `Download (${ticked.size})` : "Download";
+  $("selectall").textContent = tiles.length && ticked.size === tiles.length ? "Clear" : "Select all";
+}
+function setSelecting(on) {
+  selecting = on;
+  $("select").textContent = on ? "Done" : "Select";
+  $("files").classList.toggle("selecting", on);
+  $("selectbar").classList.toggle("hidden", !on);
+  if (!on) for (const tile of $("files").children) setTicked(tile, false);
+  updateSelection();
+}
+$("select").onclick = () => setSelecting(!selecting);
+$("selectall").onclick = () => {
+  const tiles = [...$("files").children];
+  const on = ticked.size !== tiles.length;
+  for (const tile of tiles) setTicked(tile, on);
+  updateSelection();
+};
+$("getselected").onclick = async () => {
+  const paths = [...ticked];
+  setSelecting(false);
+  for (const p of paths) {
+    const a = document.createElement("a");
+    a.href = "/api/file?path=" + encodeURIComponent(p);
+    a.download = p.split("/").pop();
+    a.click();
+    await new Promise((r) => setTimeout(r, 500));  // browsers drop downloads started in the same instant
+  }
+};
 
 // first visit: a short welcome and how to keep Studio Utility on the home screen
 function welcome() {

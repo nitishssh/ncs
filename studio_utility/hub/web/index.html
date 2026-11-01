@@ -61,8 +61,13 @@
 
   <section id="view-files" class="view">
     <div class="viewhead"><button class="back" data-view="camera">‹ Camera</button><h2>Card</h2>
+      <button id="select" class="link">Select</button>
       <button id="reload" class="link">Refresh</button></div>
     <div id="filecount" class="muted small"></div>
+    <div id="selectbar" class="selectbar hidden">
+      <button id="selectall" class="link">Select all</button>
+      <button id="getselected" class="link" disabled>Download</button>
+    </div>
     <div id="files" class="grid"></div>
   </section>
 </main>

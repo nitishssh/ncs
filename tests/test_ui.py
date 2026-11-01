@@ -123,6 +123,26 @@ def test_auto_import_and_import_new(win, app):
     assert "already imported" in win.msg.text()
 
 
+def test_tick_files_and_download_only_those(win, app):
+    from PySide6.QtCore import Qt
+    fp = win.files
+    fp.refresh()
+    paths = list(fp.items)
+    assert len(paths) > 1 and fp.ticked() == []
+    fp.items[paths[0]].setCheckState(Qt.Checked)
+    assert fp.get_btn.text() == "Download selected (1)"
+    fp.refresh()  # a refresh keeps the ticks
+    assert fp.ticked() == [paths[0]]
+    fp.get_btn.click()
+    spin(app, 1.5)
+    assert [p.name for p in fp.dest().iterdir() if p.is_file()] == [paths[0].rsplit("/", 1)[-1]]
+    assert fp.ticked() == [] and fp.get_btn.text() == "Download selected"
+    fp.tick_all_btn.click()
+    assert fp.ticked() == paths and fp.tick_all_btn.text() == "Clear selection"
+    fp.tick_all_btn.click()
+    assert fp.ticked() == []
+
+
 def test_reconnects_after_drop(win, app):
     old = win.t
     old.connected = False
