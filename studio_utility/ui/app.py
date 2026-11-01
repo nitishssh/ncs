@@ -25,6 +25,7 @@ from studio_utility.labels import label
 from studio_utility.ui.files import FilesPanel
 from studio_utility.ui.events import EventHub
 from studio_utility.ui.tools import ToolsTab
+from studio_utility.ui.lighting import LightingTab
 from studio_utility.ui.audio_tab import AudioTab
 from studio_utility.ui.workers import CameraExecutor
 from studio_utility.ui.connection import ConnectionDialog
@@ -305,6 +306,15 @@ class MainWindow(QMainWindow):
                                        if b.isEnabled() and b.currentData() is not None})
         self.tools.message.connect(self.flash)
         more.addTab(self.tools, "Tools")
+        self.lighting = LightingTab(lambda k: [self.boxes[k].itemData(i) for i in range(self.boxes[k].count())]
+                                    if k in self.boxes and self.boxes[k].isEnabled() else [],
+                                    self.send_settings)
+        self.lighting.message.connect(self.flash)
+        lighting_scroll = QScrollArea()  # keeps the light table from forcing a taller window on every tab
+        lighting_scroll.setWidget(self.lighting)
+        lighting_scroll.setWidgetResizable(True)
+        lighting_scroll.setFrameShape(QScrollArea.NoFrame)
+        more.addTab(lighting_scroll, "Lighting")
         # External mics (DJI Mic, Kreo Sonik…) record WAVs into the same dated folder as imports
         self.audio = AudioTab(lambda: self.files.dest(), camera_settings=self.settings_grid(CAMERA_AUDIO))
         self.audio.message.connect(self.flash)
@@ -416,6 +426,7 @@ class MainWindow(QMainWindow):
             w.setVisible(not positional)
         for b in self.boxes.values():
             b.setEnabled(on and "get_setting" in self.caps)
+        self.lighting.set_connected(on and "set_setting" in self.caps)
         for p in (self.p_bat, self.p_card, self.p_lens, self.p_rec, self.p_exp):
             p.setVisible(False)
 
@@ -817,6 +828,19 @@ class MainWindow(QMainWindow):
             transport = self.t
             self.run_camera(f"setting:{key}", lambda: transport.set_setting(key, value),
                             failed=lambda error: (self.flash(f"Error: {error}"), self.load_settings()))
+
+    def send_settings(self, settings: dict[str, str]) -> list[str]:
+        """Pick values in the settings boxes (which sends them); returns the labels of the ones set."""
+        if "M" in [self.boxes["mode"].itemData(i) for i in range(self.boxes["mode"].count())]:
+            settings = {"mode": "M", **settings}  # suggested shutter/aperture/ISO only stick in manual
+        done = []
+        for key, value in settings.items():
+            box = self.boxes.get(key)
+            i = box.findData(value) if box and box.isEnabled() else -1
+            if i >= 0:
+                box.setCurrentIndex(i)
+                done.append(LABELS[key])
+        return done
 
     def focus_drive(self, step: int):
         if self.t and "focus_drive" in self.caps:
