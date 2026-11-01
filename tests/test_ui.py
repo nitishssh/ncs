@@ -346,6 +346,33 @@ def test_preview_click_maps_to_image_coordinates(win, app, monkeypatch):
     assert got and abs(got[0][0] - 0.5) < 0.02 and abs(got[0][1] - 0.5) < 0.02
 
 
+def test_mirror_flips_the_picture_but_not_the_focus_point(win, app):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor, QImage, QMouseEvent
+    image = QImage(100, 50, QImage.Format_RGB888)
+    image.fill(QColor("black"))
+    image.setPixelColor(0, 25, QColor("white"))
+    win.mirror_btn.setChecked(False)
+    win.preview.frame = None
+    win.preview.show_image(image)
+    plain = win.preview.pixmap().toImage()
+    assert plain.pixelColor(plain.width() // 2, plain.height() // 2).lightness() < 128
+    win.mirror_btn.setChecked(True)
+    pix = win.preview.pixmap()
+    flipped = pix.toImage()
+    row = flipped.height() // 2
+    assert flipped.pixelColor(flipped.width() - 1, row).lightness() > plain.pixelColor(flipped.width() - 1, row).lightness()
+    got = []
+    win.preview.clicked.connect(lambda x, y: got.append(x))
+    size = pix.deviceIndependentSize()
+    at = QPointF((win.preview.width() - size.width()) / 2 + size.width() * 0.25, win.preview.height() / 2)
+    win.preview.mousePressEvent(QMouseEvent(QMouseEvent.MouseButtonPress, at, at, Qt.LeftButton,
+                                            Qt.LeftButton, Qt.NoModifier))
+    assert abs(got[0] - 0.75) < 0.02  # left of the flipped picture is the camera's right
+    assert win.prefs.value("mirror", False, type=bool)
+    win.mirror_btn.setChecked(False)
+
+
 def test_full_screen_live_view_opens_gets_frames_and_closes(win, app):
     spin(app, 0.3)
     win.full_btn.click()

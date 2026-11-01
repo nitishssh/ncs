@@ -154,6 +154,19 @@ $("look").onclick = () => {
   renderReadouts();
 };
 
+// Mirror: flips only this screen's preview, for facing the camera; recordings are never flipped
+function showMirror() {
+  $("live").classList.toggle("mirrored", mirrorOn);
+  $("mirror").classList.toggle("on", mirrorOn);
+}
+$("mirror").onclick = () => {
+  mirrorOn = !mirrorOn;
+  try { localStorage.setItem("mirror", mirrorOn ? "1" : "0"); } catch (e) { /* not remembered */ }
+  haptic();
+  toast(mirrorOn ? "Preview mirrored – recordings are not flipped" : "Showing the camera's true view");
+  showMirror();
+};
+
 function pick(key, d) {
   $("sheet-title").textContent = SETTING_NAMES[key];
   const box = $("sheet-options");
@@ -283,8 +296,10 @@ showMic();
 
 // ---------- live view: fetch frames in a loop while visible (works on every browser, unlike MJPEG <img>)
 let liveOn = false, lastUrl = null;
-let lutOn = false;
+let lutOn = false, mirrorOn = false;
 try { lutOn = localStorage.getItem("lut") === "clog3"; } catch (e) { /* private mode: default off */ }
+try { mirrorOn = localStorage.getItem("mirror") === "1"; } catch (e) { /* private mode: default off */ }
+showMirror();
 async function liveLoop() {
   if (liveOn) return;
   liveOn = true;
@@ -319,7 +334,8 @@ $("stage").addEventListener("click", async (e) => {
   const box = img.getBoundingClientRect();
   const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
   const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
-  const x = (e.clientX - box.left - (box.width - w) / 2) / w;
+  const seen = (e.clientX - box.left - (box.width - w) / 2) / w;
+  const x = mirrorOn ? 1 - seen : seen;  // the camera wants its own coordinates, not the flipped picture's
   const y = (e.clientY - box.top - (box.height - h) / 2) / h;
   if (x < 0 || x > 1 || y < 0 || y > 1) return;
   const ring = $("focusring");
