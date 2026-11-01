@@ -1,0 +1,5 @@
+{
+  "name": "studio-utility-camera",
+  "version": "0.1.0",
+  "description": "Let Claude control a Canon EOS R50 V through Studio Utility: status, settings, live view, photos, recording and card files. No tool deletes card contents."
+}

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Starts the camera MCP server with the Python that has Studio Utility installed:
+# $STUDIO_UTILITY_PYTHON, else the checkout's .venv next to this plugin, else python3.
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+python="${STUDIO_UTILITY_PYTHON:-$root/.venv/bin/python}"
+[ -x "$python" ] || python=python3
+exec "$python" -m studio_utility mcp "$@"

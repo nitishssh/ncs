@@ -28,6 +28,9 @@ Files panel → **Dolby ▾**, or `studio-utility dolby vision|eac3|ac3 CLIP...`
 - **Dolby Vision 8.1** (`<clip>_dv.mp4`): shoot with **HDR PQ** on (Canon Log 3 and SDR need grading first). Needs `brew install x265 dovi_tool gpac`. The picture is re-encoded, which is slow.
 - **Dolby Digital Plus / Dolby Digital** (`<clip>_eac3.mp4`, `<clip>_ac3.mp4`): the video is copied untouched and the audio is re-encoded. Needs only ffmpeg.
 
+## AI control
+`studio-utility mcp` lets an AI client such as Claude Code control the camera over MCP. No tool deletes card contents. Setup: `docs/AI_CONTROL.md`.
+
 ## Packaging
 Use PyInstaller to build `Studio Utility.app` on macOS and `studio-utility.exe` on Windows.
 

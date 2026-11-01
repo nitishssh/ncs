@@ -1,9 +1,13 @@
 """CLI: `studio-utility` opens the UI; subcommands for scripting."""
 import argparse
 import json
+import sys
 
 
 def main():
+    if sys.argv[1:2] == ["mcp"]:  # has its own options, and stdout is reserved for the protocol
+        from studio_utility import mcp_server
+        return mcp_server.main(sys.argv[2:])
     p = argparse.ArgumentParser(prog="studio-utility")
     sub = p.add_subparsers(dest="cmd")
     sub.add_parser("ui")

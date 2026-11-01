@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "camera": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/studio-utility-mcp",
+      "args": []
+    }
+  }
+}
