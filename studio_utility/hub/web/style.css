@@ -112,6 +112,11 @@ main { flex: 1; position: relative; overflow: hidden; min-height: 0; }
 .tile { position: relative; aspect-ratio: 1; overflow: hidden; background: #111; }
 .tile img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity .25s; }
 .tile img.loaded { opacity: 1; }
+.selectbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; }
+.selecting .tile::after { content: ""; position: absolute; left: 6px; top: 6px; width: 22px; height: 22px; box-sizing: border-box; border-radius: 50%;
+  border: 2px solid #fff; background: rgba(0,0,0,.35); color: #fff; font-size: 14px; font-weight: 700; line-height: 18px; text-align: center; }
+.selecting .tile.ticked::after { content: "✓"; background: var(--accent); }
+.selecting .tile.ticked img { filter: brightness(.7); }
 .tile .badge { position: absolute; right: 4px; bottom: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(0,0,0,.65); }
 
 /* ---------- dock: card · photo · RECORD · camera · settings */

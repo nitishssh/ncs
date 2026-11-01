@@ -111,13 +111,14 @@ class FilesPanel(QWidget):
         self.grid = QListWidget()
         self.grid.setViewMode(QListWidget.IconMode)
         self.grid.setIconSize(THUMB)
-        self.grid.setGridSize(QSize(THUMB.width() + 16, THUMB.height() + 34))
+        self.grid.setGridSize(QSize(THUMB.width() + 40, THUMB.height() + 34))  # room for the tick box
         self.grid.setResizeMode(QListWidget.Adjust)
         self.grid.setMovement(QListWidget.Static)
         self.grid.setUniformItemSizes(True)  # fixed cells: inserting at the top can't overlap neighbours
         self.grid.setSelectionMode(QListWidget.ExtendedSelection)
         self.grid.setMinimumHeight(THUMB.height() + 40)  # one full row of thumbnails with names
         self.grid.itemDoubleClicked.connect(lambda it: self.download([it.data(Qt.UserRole)]))
+        self.grid.itemChanged.connect(lambda _it: self.update_tick_controls())
         self.scroll_settle = QTimer(self, singleShot=True, interval=120)  # one thumbnail check per scroll, not per pixel
         self.scroll_settle.timeout.connect(self.want_visible_thumbs)
         self.grid.verticalScrollBar().valueChanged.connect(lambda _v: self.scroll_settle.start())
@@ -125,7 +126,10 @@ class FilesPanel(QWidget):
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh)
         self.get_btn = QPushButton("Download selected")
-        self.get_btn.clicked.connect(lambda: self.download([i.data(Qt.UserRole) for i in self.grid.selectedItems()]))
+        self.get_btn.setToolTip("Download the ticked files (or the highlighted ones if nothing is ticked)")
+        self.get_btn.clicked.connect(self.download_selected)
+        self.tick_all_btn = QPushButton("Select all")
+        self.tick_all_btn.clicked.connect(self.toggle_all_ticks)
         self.auto = QCheckBox("Auto-import new shots")
         self.auto.setToolTip("Download every new photo/movie as soon as the camera saves it")
         self.auto.toggled.connect(self.set_auto)
@@ -168,7 +172,7 @@ class FilesPanel(QWidget):
         self.resume_btn.setToolTip("Retry transfers saved from an earlier session")
         self.resume_btn.clicked.connect(self.resume_interrupted)
         self.resume_btn.setVisible(False)
-        for w in (self.refresh_btn, self.import_btn, self.get_btn, self.auto, self.jpeg_only, self.sync_btn,
+        for w in (self.refresh_btn, self.import_btn, self.tick_all_btn, self.get_btn, self.auto, self.jpeg_only, self.sync_btn,
                   self.auto_sync, self.dolby_btn, self.resume_btn):
             tools.addWidget(w)
         tools.addStretch()
@@ -217,6 +221,7 @@ class FilesPanel(QWidget):
         if t is None:
             self.grid.clear()
             self.items.clear()
+            self.update_tick_controls()
             return
         self.update_resume_button()
 
@@ -248,20 +253,24 @@ class FilesPanel(QWidget):
         except Exception as e:
             self.message.emit(f"File list failed: {e}")
             return
+        ticked = set(self.ticked())
         self.grid.clear()
         self.items.clear()
         newest = newest_first(paths, getattr(self.t, "file_times", None))
         for p in newest:
-            self.add_item(p)
+            self.add_item(p, ticked=p in ticked)
+        self.update_tick_controls()
         self.load_thumbs(newest[:FIRST_THUMBS])
         self.message.emit(f"{len(paths)} files on the card")
 
-    def add_item(self, path: str, top: bool = False):
+    def add_item(self, path: str, top: bool = False, ticked: bool = False):
         name = path.rsplit("/", 1)[-1]
         it = QListWidgetItem(name)
         it.setData(Qt.UserRole, path)
         it.setToolTip(path.split("/contents/", 1)[-1])
         it.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+        it.setCheckState(Qt.Checked if ticked else Qt.Unchecked)
         self.items[path] = it
         if top:
             self.grid.insertItem(0, it)
@@ -292,6 +301,30 @@ class FilesPanel(QWidget):
         if it:
             pix = QPixmap.fromImage(QImage.fromData(data)).scaled(THUMB, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             it.setIcon(QIcon(pix))
+
+    # ticks
+    def ticked(self) -> list[str]:
+        return [p for p, it in self.items.items() if it.checkState() == Qt.Checked]
+
+    def update_tick_controls(self):
+        count = len(self.ticked())
+        self.get_btn.setText(f"Download selected ({count})" if count else "Download selected")
+        self.tick_all_btn.setText("Clear selection" if self.items and count == len(self.items) else "Select all")
+
+    def toggle_all_ticks(self):
+        state = Qt.Unchecked if len(self.ticked()) == len(self.items) else Qt.Checked
+        self.grid.blockSignals(True)  # one label update, not one per file
+        for it in self.items.values():
+            it.setCheckState(state)
+        self.grid.blockSignals(False)
+        self.update_tick_controls()
+
+    def download_selected(self):
+        remotes = self.ticked() or [i.data(Qt.UserRole) for i in self.grid.selectedItems()]
+        if not remotes:
+            self.message.emit("Tick the files to download first")
+            return
+        self.download(sorted(remotes))  # oldest first, in camera order
 
     # downloads
     def download(self, remotes: list[str], destinations: dict[str, Path] | None = None):
@@ -426,6 +459,7 @@ class FilesPanel(QWidget):
         it = self.items.get(remote)
         if it:
             it.setText("✓ " + remote.rsplit("/", 1)[-1])
+            it.setCheckState(Qt.Unchecked)  # failed files stay ticked, ready to retry
         self.message.emit(f"Saved {local}")
 
     def check_clip_sound(self, clip: Path):
