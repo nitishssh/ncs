@@ -12,6 +12,7 @@ Run:  python -m studio_utility.hub --camera 10.11.0.2:8090      (or --camera moc
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import subprocess
 import sys
@@ -521,12 +522,19 @@ class Hub:
         return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "max-age=86400"})
 
     async def api_file(self, request):
-        """Original file, byte-for-byte (cached on the hub so several devices don't re-read the card)."""
+        """Original file, byte-for-byte (cached on the hub so several devices don't re-read the card).
+        Names repeat across folders and after a card format, so the cache key is the path plus the file's thumbnail;
+        with no thumbnail to tell files apart, read the card again rather than risk serving a different file."""
         remote = request.query["path"]
         name = remote.rsplit("/", 1)[-1]
-        cached = CACHE / name
+        try:
+            thumb = await self.cam(self.cam_t.thumbnail, remote, counted=False)
+            key = hashlib.sha256(remote.encode() + b"\0" + thumb).hexdigest()[:16]
+        except Exception:  # noqa: BLE001 - if the camera is really gone, the download below reports it
+            key = secrets.token_hex(8)
+        cached = CACHE / key / name
         if not cached.exists():
-            await self.cam(self.cam_t.download, remote, CACHE)
+            await self.cam(self.cam_t.download, remote, CACHE / key)
         return web.FileResponse(cached, headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     async def api_live_jpg(self, request):
