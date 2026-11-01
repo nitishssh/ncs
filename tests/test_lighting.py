@@ -74,3 +74,7 @@ def test_lighting_tab_sends_to_mock(win, app):  # noqa: F811
     s = tab.result
     assert win.t.values["mode"] == "M"
     assert (win.t.values["tv"], win.t.values["av"], win.t.values["iso"]) == (s.tv, s.av, s.iso)
+
+
+def test_lighting_tab_does_not_force_a_taller_window(win):  # noqa: F811
+    assert win.more_tabs.minimumSizeHint().height() < win.lighting.minimumSizeHint().height()

@@ -310,7 +310,11 @@ class MainWindow(QMainWindow):
                                     if k in self.boxes and self.boxes[k].isEnabled() else [],
                                     self.send_settings)
         self.lighting.message.connect(self.flash)
-        more.addTab(self.lighting, "Lighting")
+        lighting_scroll = QScrollArea()  # keeps the light table from forcing a taller window on every tab
+        lighting_scroll.setWidget(self.lighting)
+        lighting_scroll.setWidgetResizable(True)
+        lighting_scroll.setFrameShape(QScrollArea.NoFrame)
+        more.addTab(lighting_scroll, "Lighting")
         # External mics (DJI Mic, Kreo Sonik…) record WAVs into the same dated folder as imports
         self.audio = AudioTab(lambda: self.files.dest(), camera_settings=self.settings_grid(CAMERA_AUDIO))
         self.audio.message.connect(self.flash)
