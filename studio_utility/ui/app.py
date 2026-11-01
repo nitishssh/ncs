@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSettings, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QTransform
 from PySide6.QtWidgets import (QApplication, QMenu, QCheckBox, QComboBox, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QMainWindow, QPushButton, QScrollArea, QSlider, QTabWidget,
                                QVBoxLayout, QWidget)
@@ -90,6 +90,11 @@ class Preview(QLabel):
     def __init__(self, *a):
         super().__init__(*a)
         self.frame: QImage | None = None
+        self.mirrored = False  # display only: recordings and the camera's coordinates are never flipped
+
+    def set_mirrored(self, on: bool):
+        self.mirrored = on
+        self.rescale()
 
     def show_image(self, image: QImage):
         self.frame = image
@@ -100,6 +105,8 @@ class Preview(QLabel):
             return
         dpr = self.devicePixelRatioF()
         pix = QPixmap.fromImage(self.frame.scaled(self.size() * dpr, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        if self.mirrored:
+            pix = pix.transformed(QTransform.fromScale(-1, 1))
         pix.setDevicePixelRatio(dpr)
         self.setPixmap(pix)
 
@@ -125,7 +132,7 @@ class Preview(QLabel):
         x = (e.position().x() - ox) / size.width()
         y = (e.position().y() - oy) / size.height()
         if 0 <= x <= 1 and 0 <= y <= 1:
-            self.clicked.emit(x, y)
+            self.clicked.emit(1 - x if self.mirrored else x, y)
 
 
 class FullView(Preview):
@@ -241,6 +248,10 @@ class MainWindow(QMainWindow):
         self.full_btn.setToolTip("Full-screen live view (F; double-click the preview)")
         self.full_btn.setShortcut("F")
         self.full_btn.clicked.connect(self.toggle_full_view)
+        self.mirror_btn = QPushButton("Mirror")
+        self.mirror_btn.setCheckable(True)
+        self.mirror_btn.setToolTip("Flip the preview like a mirror, for facing the camera. Recordings are not flipped.")
+        self.mirror_btn.toggled.connect(self.set_mirror)
         # Continuous power zoom (real R50 V): hold W/T to move, release to stop
         self.wide_btn, self.tele_btn = QPushButton("◀ W"), QPushButton("T ▶")
         for b, d in ((self.wide_btn, "wide"), (self.tele_btn, "tele")):
@@ -255,6 +266,7 @@ class MainWindow(QMainWindow):
         for cb in (self.ov_hist, self.ov_af, self.ov_peak, self.ov_zebra):
             zoom_row.addWidget(cb)
         zoom_row.addWidget(self.af_btn)
+        zoom_row.addWidget(self.mirror_btn)
         zoom_row.addWidget(self.full_btn)
 
         # Settings tabs
@@ -373,6 +385,7 @@ class MainWindow(QMainWindow):
         self.set_connected(False)
         # Remember the last connection and reconnect to it on launch
         self.prefs = QSettings(*PREFS)
+        self.mirror_btn.setChecked(self.prefs.value("mirror", False, type=bool))
         self.updater = Updater(self, self.prefs)
         self._want, self._attempts = None, 0
         self.retry = QTimer(self)
@@ -943,11 +956,18 @@ class MainWindow(QMainWindow):
         if self.full_view:
             self.full_view.show_image(image)
 
+    def set_mirror(self, on: bool):
+        self.prefs.setValue("mirror", on)
+        self.preview.set_mirrored(on)
+        if self.full_view:
+            self.full_view.set_mirrored(on)
+
     def toggle_full_view(self):
         if self.full_view:
             self.full_view.close()
             return
         self.full_view = FullView()
+        self.full_view.mirrored = self.preview.mirrored
         self.full_view.clicked.connect(self.focus_at)
         self.full_view.toggle_full.connect(self.toggle_full_view)
         self.full_view.closed.connect(self._full_view_closed)
