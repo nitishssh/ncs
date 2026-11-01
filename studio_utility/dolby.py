@@ -49,9 +49,15 @@ def _run(cmd: list[str], **kw):
     return r
 
 
+def _require_file(clip: Path):
+    if not clip.is_file():  # otherwise ffmpeg's error reads as "no audio track" / "no video frames"
+        raise RuntimeError(f"{clip}: file not found")
+
+
 def audio(clip: Path, codec: str = "eac3", out: Path | None = None) -> Path:
     """Re-encode every audio track to AC-3 / E-AC-3; video and track titles copied as they are."""
     name, rate = AUDIO_CODECS[codec]
+    _require_file(clip)
     streams = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(clip)], capture_output=True, text=True).stderr
     if "Audio:" not in streams:  # otherwise ffmpeg happily writes a video-only copy with no Dolby audio
         raise RuntimeError(f"{clip.name} has no audio track to encode as {name}")
@@ -74,6 +80,7 @@ def vision(clip: Path, out: Path | None = None, crf: int = 18, preset: str = "sl
     """Dolby Vision 8.1 MP4. Re-encodes the picture (slow: roughly real time or slower on a laptop)."""
     if missing := missing_tools():
         raise RuntimeError(f"missing {', '.join(missing)} (brew install x265 dovi_tool gpac)")
+    _require_file(clip)
     info = probe(clip)
     if not info["frames"]:
         raise RuntimeError(f"{clip.name}: no video frames found")

@@ -62,14 +62,19 @@ def main():
                 print(f"{p['id']:42} {str(p['name'])[:28]:28} options={p['options']:<3} value={p['value']}{ro}")
         print(f"{len(found)} properties. Paste this output back so the remote controls can be extended.")
     elif a.cmd == "dolby":
+        import sys
         from pathlib import Path
         from studio_utility import dolby
+        failed = 0
         for clip in map(Path, a.clips):
             try:
                 out = dolby.vision(clip, allow_sdr=a.allow_sdr) if a.kind == "vision" else dolby.audio(clip, a.kind)
                 print(out)
             except RuntimeError as e:
-                print(f"{clip.name}: {e}")
+                failed += 1
+                print(f"{clip.name}: {e}", file=sys.stderr)
+        if failed:
+            sys.exit(1)  # scripts can tell a failed export from a finished one
     elif a.cmd == "ble-scan":
         from studio_utility.transports.ble import BLETransport
         found = BLETransport.scan()
